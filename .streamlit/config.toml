@@ -8,3 +8,7 @@ font = "sans serif"
 
 [browser]
 gatherUsageStats = false
+
+[server]
+# Don't auto-rerun on source-file changes — prevents the app refreshing mid-interaction.
+runOnSave = false
