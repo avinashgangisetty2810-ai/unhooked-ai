@@ -15,6 +15,9 @@ from typing import Any, Final
 
 _DB_PATH: Final[Path] = Path(__file__).resolve().parent.parent / "data" / "unhooked.db"
 
+_VALID_STATUSES: Final[frozenset[str]] = frozenset({"clean", "slip"})
+_VALID_ROLES: Final[frozenset[str]] = frozenset({"user", "assistant"})
+
 _SCHEMA: Final[str] = """
 CREATE TABLE IF NOT EXISTS profiles (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -73,11 +76,18 @@ class Profile:
     created_at: str
 
 
+_initialized_paths: set[Path] = set()
+
+
 def _connect() -> sqlite3.Connection:
-    _DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(_DB_PATH)
+    """Open a connection, creating the schema once per database path."""
+    path = _DB_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
-    conn.executescript(_SCHEMA)
+    if path not in _initialized_paths:
+        conn.executescript(_SCHEMA)  # idempotent (IF NOT EXISTS), run once per process
+        _initialized_paths.add(path)
     return conn
 
 
@@ -116,7 +126,15 @@ def create_profile(
     daily_cost: float,
     daily_minutes: int,
 ) -> int:
-    """Insert a new profile and return its id."""
+    """Insert a new profile and return its id.
+
+    Raises:
+        ValueError: If the name is empty or numeric fields are negative.
+    """
+    if not name.strip():
+        raise ValueError("Profile name must not be empty")
+    if daily_cost < 0 or daily_minutes < 0:
+        raise ValueError("daily_cost and daily_minutes must be non-negative")
     with _connect() as conn:
         cursor = conn.execute(
             "INSERT INTO profiles (name, habit, goal, triggers, motivation, daily_cost,"
@@ -158,7 +176,17 @@ def upsert_checkin(
     note: str,
     ai_response: str,
 ) -> None:
-    """Record (or replace) today's check-in."""
+    """Record (or replace) today's check-in.
+
+    Raises:
+        ValueError: If status, mood, or craving fall outside their valid ranges.
+    """
+    if status not in _VALID_STATUSES:
+        raise ValueError(f"status must be one of {sorted(_VALID_STATUSES)}")
+    if not 1 <= mood <= 5:
+        raise ValueError("mood must be between 1 and 5")
+    if not 0 <= craving <= 10:
+        raise ValueError("craving must be between 0 and 10")
     with _connect() as conn:
         conn.execute(
             "INSERT INTO checkins (profile_id, day, status, mood, craving, note, ai_response,"
@@ -197,7 +225,13 @@ def current_streak(profile_id: int) -> int:
 
 
 def add_chat_message(profile_id: int, role: str, content: str) -> None:
-    """Append a chat message to the coach conversation."""
+    """Append a chat message to the coach conversation.
+
+    Raises:
+        ValueError: If the role is not ``user`` or ``assistant``.
+    """
+    if role not in _VALID_ROLES:
+        raise ValueError(f"role must be one of {sorted(_VALID_ROLES)}")
     with _connect() as conn:
         conn.execute(
             "INSERT INTO chat_messages (profile_id, role, content, created_at) VALUES (?, ?, ?, ?)",
