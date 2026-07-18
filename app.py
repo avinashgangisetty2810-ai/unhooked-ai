@@ -167,6 +167,14 @@ def _render_sidebar(profiles: list[db.Profile]) -> db.Profile | None:
             streak = db.current_streak(profile.id)
             st.metric("Clean streak", f"{streak} day{'s' if streak != 1 else ''} 🔥")
         st.divider()
+        with st.expander("♿ Accessibility"):
+            st.markdown(
+                "- **Keyboard**: Tab to move, arrows for radios/sliders, Enter to activate\n"
+                "- **Help everywhere**: hover the *?* icon on any input\n"
+                "- **Charts**: each chart has a plain-text summary below it\n"
+                "- **Icons**: every status emoji is paired with a text label\n"
+                "- **Contrast**: dark theme meets WCAG AA"
+            )
         st.caption("⚡ Powered by Llama 3.3 on Groq · Gemini fallback")
         return profile
 
