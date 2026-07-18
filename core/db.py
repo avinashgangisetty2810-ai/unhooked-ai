@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Final
 
@@ -17,6 +17,11 @@ _DB_PATH: Final[Path] = Path(__file__).resolve().parent.parent / "data" / "unhoo
 
 _VALID_STATUSES: Final[frozenset[str]] = frozenset({"clean", "slip"})
 _VALID_ROLES: Final[frozenset[str]] = frozenset({"user", "assistant"})
+
+_MOOD_MIN: Final[int] = 1
+_MOOD_MAX: Final[int] = 5
+_CRAVING_MIN: Final[int] = 0
+_CRAVING_MAX: Final[int] = 10
 
 _SCHEMA: Final[str] = """
 CREATE TABLE IF NOT EXISTS profiles (
@@ -92,7 +97,13 @@ def _connect() -> sqlite3.Connection:
 
 
 def _now() -> str:
-    return datetime.now().isoformat(timespec="seconds")
+    """Timezone-aware local timestamp string (seconds precision)."""
+    return datetime.now(tz=UTC).astimezone().isoformat(timespec="seconds")
+
+
+def local_today() -> date:
+    """Today's date in the server's local timezone (timezone-aware source)."""
+    return datetime.now(tz=UTC).astimezone().date()
 
 
 def _row_to_profile(row: sqlite3.Row) -> Profile:
@@ -183,10 +194,10 @@ def upsert_checkin(
     """
     if status not in _VALID_STATUSES:
         raise ValueError(f"status must be one of {sorted(_VALID_STATUSES)}")
-    if not 1 <= mood <= 5:
-        raise ValueError("mood must be between 1 and 5")
-    if not 0 <= craving <= 10:
-        raise ValueError("craving must be between 0 and 10")
+    if not _MOOD_MIN <= mood <= _MOOD_MAX:
+        raise ValueError(f"mood must be between {_MOOD_MIN} and {_MOOD_MAX}")
+    if not _CRAVING_MIN <= craving <= _CRAVING_MAX:
+        raise ValueError(f"craving must be between {_CRAVING_MIN} and {_CRAVING_MAX}")
     with _connect() as conn:
         conn.execute(
             "INSERT INTO checkins (profile_id, day, status, mood, craving, note, ai_response,"
@@ -194,7 +205,7 @@ def upsert_checkin(
             " ON CONFLICT(profile_id, day) DO UPDATE SET status=excluded.status,"
             " mood=excluded.mood, craving=excluded.craving, note=excluded.note,"
             " ai_response=excluded.ai_response",
-            (profile_id, date.today().isoformat(), status, mood, craving, note, ai_response, _now()),
+            (profile_id, local_today().isoformat(), status, mood, craving, note, ai_response, _now()),
         )
 
 
@@ -213,7 +224,7 @@ def current_streak(profile_id: int) -> int:
     """Consecutive clean days counting back from today (or yesterday)."""
     checkins = {c["day"]: c["status"] for c in get_checkins(profile_id, limit=365)}
     streak = 0
-    day = date.today()
+    day = local_today()
     if checkins.get(day.isoformat()) == "slip":
         return 0
     if day.isoformat() not in checkins:
@@ -243,8 +254,7 @@ def get_chat_messages(profile_id: int, limit: int = 40) -> list[dict[str, str]]:
     """Return the coach conversation in chronological order."""
     with _connect() as conn:
         rows = conn.execute(
-            "SELECT role, content FROM chat_messages WHERE profile_id = ?"
-            " ORDER BY id DESC LIMIT ?",
+            "SELECT role, content FROM chat_messages WHERE profile_id = ? ORDER BY id DESC LIMIT ?",
             (profile_id, limit),
         ).fetchall()
     return [dict(row) for row in reversed(rows)]
@@ -263,8 +273,7 @@ def get_events(profile_id: int, kind: str, limit: int = 20) -> list[dict[str, An
     """Return recent events of one kind, newest first."""
     with _connect() as conn:
         rows = conn.execute(
-            "SELECT payload_json, created_at FROM events WHERE profile_id = ? AND kind = ?"
-            " ORDER BY id DESC LIMIT ?",
+            "SELECT payload_json, created_at FROM events WHERE profile_id = ? AND kind = ? ORDER BY id DESC LIMIT ?",
             (profile_id, kind, limit),
         ).fetchall()
     events: list[dict[str, Any]] = []

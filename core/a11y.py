@@ -20,6 +20,12 @@ MAIN_ANCHOR_HTML: Final[str] = '<div id="main-content" tabindex="-1"></div>'
 
 _BASE_FONT_PX: Final[int] = 16
 
+#: Length of an ``rrggbb`` hex color string.
+_HEX_DIGITS: Final[int] = 6
+
+#: sRGB linearization cutoff from the WCAG 2.x relative-luminance definition.
+_SRGB_LINEAR_CUTOFF: Final[float] = 0.04045
+
 #: Minimum WCAG AA contrast for normal text (1.4.3) and for UI components (1.4.11).
 AA_TEXT_CONTRAST: Final[float] = 4.5
 AA_COMPONENT_CONTRAST: Final[float] = 3.0
@@ -67,12 +73,12 @@ def relative_luminance(hex_color: str) -> float:
         ValueError: If the string is not a 6-digit hex color.
     """
     value = hex_color.lstrip("#")
-    if len(value) != 6:
+    if len(value) != _HEX_DIGITS:
         raise ValueError(f"Expected #rrggbb color, got {hex_color!r}")
     linear: list[float] = []
     for i in (0, 2, 4):
         channel = int(value[i : i + 2], 16) / 255
-        linear.append(channel / 12.92 if channel <= 0.04045 else ((channel + 0.055) / 1.055) ** 2.4)
+        linear.append(channel / 12.92 if channel <= _SRGB_LINEAR_CUTOFF else ((channel + 0.055) / 1.055) ** 2.4)
     red, green, blue = linear
     return 0.2126 * red + 0.7152 * green + 0.0722 * blue
 

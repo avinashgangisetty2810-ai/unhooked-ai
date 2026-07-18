@@ -61,17 +61,15 @@ def _profile_context(profile: db.Profile) -> str:
     ]
     if recent:
         lines.append("Recent check-ins (newest first):")
-        for c in recent:
-            lines.append(
-                f"- {c['day']}: {c['status']}, mood {c['mood']}/5, craving {c['craving']}/10"
-                + (f", note: {c['note']}" if c["note"] else "")
-            )
+        lines.extend(
+            f"- {c['day']}: {c['status']}, mood {c['mood']}/5, craving {c['craving']}/10"
+            + (f", note: {c['note']}" if c["note"] else "")
+            for c in recent
+        )
     return "\n".join(lines)
 
 
-def generate_plan(
-    profile: db.Profile, *, on_progress: Callable[[str], None] | None = None
-) -> dict[str, Any]:
+def generate_plan(profile: db.Profile, *, on_progress: Callable[[str], None] | None = None) -> dict[str, Any]:
     """Generate a personalized staged recovery plan as structured JSON."""
     prompt = f"""You are an addiction-recovery coach. Create a personalized 4-week plan to help
 this person break their habit. Be specific to THEIR habit, triggers, and motivation — no
@@ -109,7 +107,7 @@ def _nudge_prompt(profile: db.Profile, *, status: str, mood: int, craving: int, 
 {_profile_context(profile)}
 
 Today's check-in: status={status} (clean = resisted the habit, slip = gave in),
-mood={mood}/5, craving intensity={craving}/10, note="{note or 'none'}"
+mood={mood}/5, craving intensity={craving}/10, note="{note or "none"}"
 Streak before today: {streak} day(s).
 
 Write a 3-5 sentence personal response. Rules:
@@ -129,9 +127,7 @@ def checkin_nudge(profile: db.Profile, *, status: str, mood: int, craving: int, 
     return chat([{"role": "user", "content": prompt}], temperature=0.8)
 
 
-def checkin_nudge_stream(
-    profile: db.Profile, *, status: str, mood: int, craving: int, note: str
-) -> Iterator[str]:
+def checkin_nudge_stream(profile: db.Profile, *, status: str, mood: int, craving: int, note: str) -> Iterator[str]:
     """Streaming variant of :func:`checkin_nudge` for live typing in the UI."""
     prompt = _nudge_prompt(profile, status=status, mood=mood, craving=craving, note=note)
     return chat_stream([{"role": "user", "content": prompt}], temperature=0.8)
@@ -199,9 +195,7 @@ Return ONLY a JSON object:
     return chat_json([{"role": "user", "content": prompt}], temperature=0.7, on_delta=on_progress)
 
 
-def relapse_risk(
-    profile: db.Profile, *, on_progress: Callable[[str], None] | None = None
-) -> dict[str, Any]:
+def relapse_risk(profile: db.Profile, *, on_progress: Callable[[str], None] | None = None) -> dict[str, Any]:
     """Analyze recent check-ins and estimate relapse risk with reasoning."""
     checkins = db.get_checkins(profile.id, limit=14)
     if not checkins:
@@ -231,9 +225,7 @@ Return ONLY a JSON object:
     return result
 
 
-def weekly_insights(
-    profile: db.Profile, *, on_progress: Callable[[str], None] | None = None
-) -> dict[str, Any]:
+def weekly_insights(profile: db.Profile, *, on_progress: Callable[[str], None] | None = None) -> dict[str, Any]:
     """Generate a weekly progress report from real check-in data."""
     checkins = db.get_checkins(profile.id, limit=14)
     prompt = f"""You are a habit-change data analyst. Write this user's progress insights from
@@ -257,9 +249,7 @@ Cite actual numbers from the data (streak, moods, craving levels).
     return chat_json([{"role": "user", "content": prompt}], temperature=0.5, on_delta=on_progress)
 
 
-def _coach_messages(
-    profile: db.Profile, history: list[dict[str, str]], user_message: str
-) -> list[dict[str, str]]:
+def _coach_messages(profile: db.Profile, history: list[dict[str, str]], user_message: str) -> list[dict[str, str]]:
     """Build the grounded coach-chat message list shared by blocking and streaming variants."""
     system = f"""You are Unhooked's recovery coach: warm, practical, non-judgmental, and brief
 (2-6 sentences unless asked for detail). You use CBT and motivational-interviewing techniques.
@@ -267,7 +257,7 @@ You know this user's real data:
 
 {_profile_context(profile)}
 
-Their recovery plan mantra: {profile.plan.get('mantra', 'not set')}
+Their recovery plan mantra: {profile.plan.get("mantra", "not set")}
 Ground every answer in their actual habit, triggers, and progress. Never invent data.
 When it fits, end your reply with one short question that keeps the conversation going.
 If they mention self-harm or suicide, tell them to contact AASRA 91-9820466726 (India) or
@@ -287,9 +277,7 @@ def coach_reply(profile: db.Profile, history: list[dict[str, str]], user_message
     return chat(_coach_messages(profile, history, user_message), temperature=0.7)
 
 
-def coach_reply_stream(
-    profile: db.Profile, history: list[dict[str, str]], user_message: str
-) -> Iterator[str]:
+def coach_reply_stream(profile: db.Profile, history: list[dict[str, str]], user_message: str) -> Iterator[str]:
     """Streaming variant of :func:`coach_reply` — yields the reply as it is generated."""
     if is_crisis(user_message):
         yield CRISIS_MESSAGE

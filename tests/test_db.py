@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import timedelta
 
 import pytest
 
@@ -70,12 +70,8 @@ class TestProfiles:
 class TestCheckins:
     def test_upsert_inserts_then_updates_same_day(self) -> None:
         profile_id = _make_profile()
-        db.upsert_checkin(
-            profile_id=profile_id, status="clean", mood=4, craving=2, note="ok", ai_response="nice"
-        )
-        db.upsert_checkin(
-            profile_id=profile_id, status="slip", mood=2, craving=8, note="bad", ai_response="hang on"
-        )
+        db.upsert_checkin(profile_id=profile_id, status="clean", mood=4, craving=2, note="ok", ai_response="nice")
+        db.upsert_checkin(profile_id=profile_id, status="slip", mood=2, craving=8, note="bad", ai_response="hang on")
         checkins = db.get_checkins(profile_id)
         assert len(checkins) == 1
         assert checkins[0]["status"] == "slip"
@@ -88,9 +84,7 @@ class TestCheckins:
     def test_invalid_checkin_values_rejected(self, status: str, mood: int, craving: int) -> None:
         profile_id = _make_profile()
         with pytest.raises(ValueError):
-            db.upsert_checkin(
-                profile_id=profile_id, status=status, mood=mood, craving=craving, note="", ai_response=""
-            )
+            db.upsert_checkin(profile_id=profile_id, status=status, mood=mood, craving=craving, note="", ai_response="")
 
     def test_get_checkins_respects_limit(self) -> None:
         profile_id = _make_profile()
@@ -100,7 +94,7 @@ class TestCheckins:
 
 def _seed_checkins(profile_id: int, statuses: list[str], *, start_today: bool = True) -> None:
     """Insert one check-in per day counting back from today (or yesterday)."""
-    day = date.today() if start_today else date.today() - timedelta(days=1)
+    day = db.local_today() if start_today else db.local_today() - timedelta(days=1)
     with db._connect() as conn:
         for status in statuses:
             conn.execute(
@@ -133,7 +127,7 @@ class TestStreak:
     def test_streak_broken_by_gap(self) -> None:
         profile_id = _make_profile()
         with db._connect() as conn:
-            today = date.today()
+            today = db.local_today()
             for offset in (0, 2, 3):  # gap at day -1
                 conn.execute(
                     "INSERT INTO checkins (profile_id, day, status, mood, craving, note,"
@@ -177,8 +171,7 @@ class TestEvents:
         profile_id = _make_profile()
         with db._connect() as conn:
             conn.execute(
-                "INSERT INTO events (profile_id, kind, payload_json, created_at)"
-                " VALUES (?, 'risk', '{broken', ?)",
+                "INSERT INTO events (profile_id, kind, payload_json, created_at) VALUES (?, 'risk', '{broken', ?)",
                 (profile_id, db._now()),
             )
         assert db.get_events(profile_id, "risk") == []

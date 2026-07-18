@@ -77,25 +77,19 @@ class TestRelapseRisk:
         assert risk["level"] == "unknown"
 
     def test_invalid_level_coerced_to_watch(self, profile: db.Profile) -> None:
-        db.upsert_checkin(
-            profile_id=profile.id, status="clean", mood=3, craving=3, note="", ai_response=""
-        )
+        db.upsert_checkin(profile_id=profile.id, status="clean", mood=3, craving=3, note="", ai_response="")
         with patch.object(features, "chat_json", return_value={"level": "catastrophic", "reason": "r"}):
             assert features.relapse_risk(profile)["level"] == "watch"
 
     def test_valid_level_passes_through(self, profile: db.Profile) -> None:
-        db.upsert_checkin(
-            profile_id=profile.id, status="clean", mood=4, craving=1, note="", ai_response=""
-        )
+        db.upsert_checkin(profile_id=profile.id, status="clean", mood=4, craving=1, note="", ai_response="")
         with patch.object(features, "chat_json", return_value={"level": "low", "reason": "steady"}):
             assert features.relapse_risk(profile)["level"] == "low"
 
 
 class TestContextAndReplies:
     def test_profile_context_includes_checkins(self, profile: db.Profile) -> None:
-        db.upsert_checkin(
-            profile_id=profile.id, status="slip", mood=2, craving=9, note="rough day", ai_response=""
-        )
+        db.upsert_checkin(profile_id=profile.id, status="slip", mood=2, craving=9, note="rough day", ai_response="")
         context = features._profile_context(profile)
         assert "Ravi" in context
         assert "rough day" in context

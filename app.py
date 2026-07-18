@@ -8,8 +8,7 @@ from __future__ import annotations
 
 import importlib
 import inspect
-from datetime import date
-from typing import Any
+from typing import Any, Final
 
 import streamlit as st
 
@@ -23,7 +22,7 @@ if "on_progress" not in inspect.signature(features.sos_intervention).parameters:
     importlib.reload(_llm)
     features = importlib.reload(features)
 
-from core.llm import LLMError  # noqa: E402  (must follow the stale-module guard)
+from core.llm import LLMError  # must follow the stale-module guard above
 
 st.set_page_config(page_title="Unhooked — AI Recovery Coach", page_icon="🔓", layout="wide")
 
@@ -52,6 +51,9 @@ _RISK_STYLE = {
     "high": ("🔴", "High risk"),
     "unknown": ("⚪", "Not enough data"),
 }
+
+#: Cravings at or above this level trigger an immediate follow-up offer (SOS / reframe).
+_HIGH_CRAVING_THRESHOLD: Final[int] = 7
 
 
 def _ai_error(exc: LLMError) -> None:
@@ -168,7 +170,9 @@ def _render_onboarding(*, allow_cancel: bool = False) -> None:
             daily_minutes=int(daily_minutes),
         )
         profile = db.get_profile(profile_id)
-        assert profile is not None
+        if profile is None:  # pragma: no cover — freshly inserted row is always readable
+            st.error("Could not load the new profile. Please try again.")
+            return
         placeholder, on_progress = _live_progress("🧠 Your AI coach is designing your personalized plan")
         try:
             plan = features.generate_plan(profile, on_progress=on_progress)
@@ -266,7 +270,9 @@ def _render_metrics(profile: db.Profile, streak: int, clean_days: int) -> None:
     col1.metric("Clean streak", f"{streak} 🔥", help="Consecutive clean days ending today")
     col2.metric("Clean days (30d)", clean_days, help="Clean check-ins in the last 30 days")
     col3.metric("Money saved", f"₹{clean_days * profile.daily_cost:,.0f}", help="Clean days × daily habit cost")
-    col4.metric("Time reclaimed", f"{clean_days * profile.daily_minutes / 60:.1f} h", help="Clean days × daily time cost")
+    col4.metric(
+        "Time reclaimed", f"{clean_days * profile.daily_minutes / 60:.1f} h", help="Clean days × daily time cost"
+    )
 
 
 def _render_trend_chart(checkins: list[dict[str, Any]]) -> None:
@@ -357,9 +363,7 @@ def _render_checkin(profile: db.Profile) -> None:
     """Render the daily check-in form, hard-day follow-up actions, and recent history."""
     st.header("📅 Daily check-in")
     st.caption("30 seconds a day. The AI adapts its coaching to what you log.")
-    today_logged = any(
-        c for c in db.get_checkins(profile.id, limit=1) if c["day"] == date.today().isoformat()
-    )
+    today_logged = any(c for c in db.get_checkins(profile.id, limit=1) if c["day"] == db.local_today().isoformat())
     if today_logged:
         st.success("You already checked in today — resubmitting will update it.")
     with st.form("checkin"):
@@ -416,7 +420,7 @@ def _save_checkin(profile: db.Profile, *, status: str, mood: int, craving: int, 
         ai_response=nudge,
     )
     st.toast("Check-in saved ✅")
-    st.session_state["checkin_followup"] = status == "slip" or craving >= 7
+    st.session_state["checkin_followup"] = status == "slip" or craving >= _HIGH_CRAVING_THRESHOLD
 
 
 def _render_checkin_history(profile: db.Profile) -> None:

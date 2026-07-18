@@ -46,9 +46,7 @@ class TestContrastMath:
         assert a11y.contrast_ratio("#34d399", "#34d399") == pytest.approx(1.0, abs=0.001)
 
     def test_order_does_not_matter(self) -> None:
-        assert a11y.contrast_ratio("#e6edf7", "#0b1120") == pytest.approx(
-            a11y.contrast_ratio("#0b1120", "#e6edf7")
-        )
+        assert a11y.contrast_ratio("#e6edf7", "#0b1120") == pytest.approx(a11y.contrast_ratio("#0b1120", "#e6edf7"))
 
     def test_luminance_bounds(self) -> None:
         assert a11y.relative_luminance("#000000") == pytest.approx(0.0)
@@ -126,16 +124,16 @@ class TestGeneratedCss:
 def _widget_calls_missing_help(source: str) -> list[str]:
     """Return descriptions of widget calls in *source* lacking a ``help`` keyword."""
     tree = ast.parse(source)
-    missing: list[str] = []
-    for node in ast.walk(tree):
+    return [
+        f"{node.func.attr} at line {node.lineno}"
+        for node in ast.walk(tree)
         if (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
             and node.func.attr in WIDGETS_REQUIRING_HELP
             and not any(kw.arg == "help" for kw in node.keywords)
-        ):
-            missing.append(f"{node.func.attr} at line {node.lineno}")
-    return missing
+        )
+    ]
 
 
 class TestAppAccessibilityGates:

@@ -1,0 +1,109 @@
+# Unhooked — project & quality tooling configuration.
+# Quality gates: ruff (strict lint), mypy (strict typing), pytest + coverage.
+
+[project]
+name = "unhooked"
+version = "1.0.0"
+description = "GenAI-powered coach for breaking bad habits and addictions (Streamlit)"
+requires-python = ">=3.11"
+
+# ---------------------------------------------------------------------------
+# Lint — ruff with a strict, broad ruleset
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+src = ["."]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",     # pycodestyle
+    "F",          # pyflakes
+    "I",          # isort
+    "N",          # pep8-naming
+    "UP",         # pyupgrade
+    "B",          # flake8-bugbear
+    "C4",         # flake8-comprehensions
+    "C90",        # mccabe complexity
+    "SIM",        # flake8-simplify
+    "RET",        # flake8-return
+    "ARG",        # flake8-unused-arguments
+    "PTH",        # flake8-use-pathlib
+    "RUF",        # ruff-specific
+    "PL",         # pylint
+    "PERF",       # perflint
+    "DTZ",        # flake8-datetimez
+    "BLE",        # flake8-blind-except
+    "S",          # flake8-bandit (security)
+    "TRY",        # tryceratops
+    "EM",         # flake8-errmsg
+    "ANN",        # flake8-annotations (type hints everywhere)
+    "D",          # pydocstyle (docstrings everywhere)
+]
+ignore = [
+    "D203", "D213",   # incompatible with D211/D212 (Google style)
+    "D107",           # __init__ docstrings — class docstring covers construction
+    "ANN401",         # typing.Any is intentional at the LLM JSON boundary
+    "TRY003", "EM101", "EM102",  # short literal messages in raises are fine at this scale
+    "PERF203",        # try/except inside loop is inherent to the provider retry chain
+]
+# UI copy legitimately uses typographic characters; don't force ASCII look-alikes.
+allowed-confusables = ["–", "×", "➕"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = [
+    "S101",     # asserts are the point of tests
+    "SLF001",   # tests may exercise private helpers directly
+    "D",        # test names are the documentation
+    "PLR2004",  # literal expected values are clearer than named constants
+    "ANN",      # fixture/param annotations add noise, not safety
+    "ARG",      # pytest fixtures/mocks often accept unused params
+    "SIM117",   # nested `with` blocks read better in mock-heavy tests
+]
+
+[tool.ruff.lint.pylint]
+max-args = 7  # keyword-only persistence APIs (create_profile, upsert_checkin)
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+# ---------------------------------------------------------------------------
+# Types — mypy in strict mode
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unreachable = true
+show_error_codes = true
+files = ["app.py", "core", "tests"]
+
+[[tool.mypy.overrides]]
+module = ["streamlit", "streamlit.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+disallow_untyped_calls = false
+disallow_untyped_decorators = false  # pytest fixtures/parametrize
+# Tests monkeypatch module internals (e.g. core.llm.requests) and build loose
+# mock payloads; strict source rules would fight the mocking style, not find bugs.
+disable_error_code = ["attr-defined", "no-untyped-call", "unreachable", "no-any-return", "type-arg"]
+
+# ---------------------------------------------------------------------------
+# Tests & coverage
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+
+[tool.coverage.run]
+source = ["core"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+]

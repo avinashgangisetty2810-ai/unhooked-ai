@@ -117,17 +117,48 @@ Accessibility is engineered in code (`core/a11y.py`) and **enforced by automated
   formula on every test run; #e6edf7 on #0b1120 ≈ 15.9:1.
 - **Clear empty states** — first-time users get explicit next-step buttons rather than blank screens.
 
+## ✅ Code quality — enforced, not aspirational
+
+Every gate below runs in CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) and blocks merge on failure.
+All tooling is configured in [pyproject.toml](pyproject.toml).
+
+| Gate | Tool | Standard |
+|------|------|----------|
+| Lint | `ruff check` | 22 rule families: pycodestyle, pyflakes, bugbear, **bandit (security)**, pylint, complexity (C90), datetime-safety, perf, docstrings — **0 violations** |
+| Formatting | `ruff format --check` | Canonical formatting, 120-col — **0 diffs** |
+| Types | `mypy --strict` | Full static type safety on `app.py` + `core/` — **0 errors** |
+| Tests | `pytest` | 103 unit + integration tests, all network I/O mocked |
+| Coverage | `pytest-cov` | **100% line + branch coverage** on `core/`, enforced with `--cov-fail-under=100` |
+
+Engineering practices baked into the code:
+
+- **Layered architecture** — UI (`app.py`) → features (`core/features.py`) → clients (`core/llm.py`, `core/db.py`); no layer skips.
+- **Security** — parameterized SQL everywhere, secrets only via env/Streamlit secrets (never in git), input validation at the persistence boundary, bandit lint gate.
+- **Resilience** — provider fallback chain (Groq → Gemini), 429 retry with backoff, streaming with graceful fallback, honest error states (no fake answers).
+- **Type-annotated, documented, timezone-aware** — every public function has type hints and a Google-style docstring; all timestamps are timezone-aware.
+
+```bash
+# run the full quality gate locally
+pip install -r requirements-dev.txt
+ruff check app.py core/ tests/ && ruff format --check app.py core/ tests/
+mypy
+pytest --cov=core --cov-report=term-missing --cov-fail-under=100
+```
+
 ## 📁 Project structure
 
 ```
 unhooked-ai/
 ├── app.py                     # Streamlit UI — onboarding + 6 pages
 ├── ACCESSIBILITY.md           # WCAG 2.1 AA conformance statement
+├── pyproject.toml             # Quality tooling config — ruff (strict), mypy (strict), coverage
+├── .github/workflows/ci.yml   # CI quality gates — lint, format, types, tests, 100% coverage
 ├── core/
-│   ├── llm.py                 # Provider chain (Groq → Gemini), retries, JSON mode
+│   ├── llm.py                 # Provider chain (Groq → Gemini), retries, streaming, JSON mode
 │   ├── db.py                  # SQLite layer — parameterized queries throughout
 │   ├── a11y.py                # WCAG helpers — contrast math + injectable CSS
 │   └── features.py            # All AI features + crisis guardrail
+├── tests/                     # 103 tests — unit + integration, 100% branch coverage on core/
 ├── .streamlit/
 │   ├── config.toml            # Dark theme
 │   └── secrets.toml.example   # Key template (real secrets gitignored)

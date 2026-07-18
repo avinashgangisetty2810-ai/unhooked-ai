@@ -11,12 +11,15 @@ provider fails, :class:`LLMError` is raised and the UI shows an honest
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from collections.abc import Callable, Iterator
 from typing import Any, Final
 
 import requests
+
+_LOGGER: Final[logging.Logger] = logging.getLogger(__name__)
 
 _GROQ_URL: Final[str] = "https://api.groq.com/openai/v1/chat/completions"
 _GEMINI_URL: Final[str] = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
@@ -27,6 +30,7 @@ _DEFAULT_GEMINI_MODEL: Final[str] = "gemini-2.5-flash"
 _TIMEOUT_SECONDS: Final[int] = 60
 _MAX_RETRIES: Final[int] = 2
 _RETRY_BACKOFF_SECONDS: Final[float] = 1.5
+_HTTP_TOO_MANY_REQUESTS: Final[int] = 429
 
 
 class LLMError(Exception):
@@ -43,8 +47,8 @@ def _read_secret(name: str) -> str:
 
         if st.secrets.load_if_toml_exists():
             return str(st.secrets.get(name, ""))
-    except Exception:  # pragma: no cover - streamlit not available in tests
-        pass
+    except Exception as exc:  # noqa: BLE001  # pragma: no cover — secret lookup must never crash a request
+        _LOGGER.debug("Streamlit secrets unavailable for %s: %s", name, exc)
     return ""
 
 
@@ -124,7 +128,8 @@ def chat(
     """
     errors: list[str] = []
     for provider_name, provider in (("groq", _call_groq), ("gemini", _call_gemini)):
-        for attempt in range(_MAX_RETRIES):
+        # Every iteration returns, breaks, or continues — the loop never exhausts naturally.
+        for attempt in range(_MAX_RETRIES):  # pragma: no branch
             try:
                 return provider(messages, json_mode=json_mode, temperature=temperature)
             except LLMError as exc:  # provider not configured — skip retries
@@ -133,7 +138,7 @@ def chat(
             except requests.HTTPError as exc:
                 code = exc.response.status_code if exc.response is not None else 0
                 errors.append(f"{provider_name}: HTTP {code}")
-                if code == 429 and attempt < _MAX_RETRIES - 1:
+                if code == _HTTP_TOO_MANY_REQUESTS and attempt < _MAX_RETRIES - 1:
                     time.sleep(_RETRY_BACKOFF_SECONDS * (attempt + 1))
                     continue
                 break
@@ -141,6 +146,22 @@ def chat(
                 errors.append(f"{provider_name}: {type(exc).__name__}")
                 break
     raise LLMError("All AI providers failed (" + "; ".join(errors) + ")")
+
+
+def _iter_sse_deltas(response: requests.Response) -> Iterator[str]:
+    """Yield content fragments from an OpenAI-style SSE streaming response."""
+    for raw_line in response.iter_lines():
+        if not raw_line:
+            continue
+        line = raw_line.decode("utf-8") if isinstance(raw_line, bytes) else raw_line
+        if not line.startswith("data: "):
+            continue
+        data = line[len("data: ") :]
+        if data.strip() == "[DONE]":
+            return  # caller falls back if the stream produced no text
+        delta = json.loads(data)["choices"][0].get("delta", {}).get("content")
+        if delta:
+            yield delta
 
 
 def chat_stream(
@@ -188,19 +209,9 @@ def chat_stream(
                 stream=True,
             ) as response:
                 response.raise_for_status()
-                for raw_line in response.iter_lines():
-                    if not raw_line:
-                        continue
-                    line = raw_line.decode("utf-8") if isinstance(raw_line, bytes) else raw_line
-                    if not line.startswith("data: "):
-                        continue
-                    data = line[len("data: ") :]
-                    if data.strip() == "[DONE]":
-                        break  # fall back below if the stream produced no text
-                    delta = json.loads(data)["choices"][0].get("delta", {}).get("content")
-                    if delta:
-                        yielded = True
-                        yield delta
+                for delta in _iter_sse_deltas(response):
+                    yielded = True
+                    yield delta
                 if yielded:
                     return
         except (requests.RequestException, KeyError, IndexError, ValueError):

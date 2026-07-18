@@ -105,6 +105,19 @@ class TestChat:
         assert payload["systemInstruction"]["parts"][0]["text"] == "be brief"
         assert [c["role"] for c in payload["contents"]] == ["user", "model", "user"]
 
+    def test_gemini_missing_key_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("GEMINI_API_KEY", "")
+        with patch("streamlit.secrets") as secrets:
+            secrets.load_if_toml_exists.return_value = False
+            with pytest.raises(llm.LLMError, match="GEMINI_API_KEY"):
+                llm._call_gemini([{"role": "user", "content": "hi"}], json_mode=False, temperature=0.5)
+
+    def test_gemini_json_mode_sets_mime_type(self) -> None:
+        with patch.object(llm.requests, "post", return_value=_gemini_ok("{}")) as post:
+            llm._call_gemini([{"role": "user", "content": "hi"}], json_mode=True, temperature=0.5)
+        payload = post.call_args.kwargs["json"]
+        assert payload["generationConfig"]["responseMimeType"] == "application/json"
+
 
 class TestChatJson:
     def test_parses_plain_json(self) -> None:

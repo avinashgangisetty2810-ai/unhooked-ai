@@ -12,5 +12,11 @@ __pycache__/
 data/
 *.db
 
+# Tool caches / reports
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+
 # OS
 .DS_Store
