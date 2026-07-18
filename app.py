@@ -15,14 +15,27 @@ import streamlit as st
 from core import a11y, db, features
 from core import llm as _llm
 
-# Streamlit Cloud re-executes app.py on git push but keeps previously imported
-# package modules cached — a new app.py can then call into stale core/ code
-# (e.g. TypeError: unexpected keyword argument). Reload if the cache is stale.
-if "on_progress" not in inspect.signature(features.sos_intervention).parameters:
-    importlib.reload(_llm)
-    features = importlib.reload(features)
 
-from core.llm import LLMError  # must follow the stale-module guard above
+def _core_is_stale() -> bool:
+    """Detect when new app.py runs against outdated cached core/ modules.
+
+    Streamlit Cloud re-executes app.py on git push but keeps previously imported
+    package modules cached in the live process, so a freshly pushed app.py can
+    call into stale core/ code (AttributeError / TypeError). Each entry below is
+    an API this version of app.py depends on; extend it when app.py starts using
+    a new core attribute.
+    """
+    return (
+        not hasattr(db, "local_today") or "on_progress" not in inspect.signature(features.sos_intervention).parameters
+    )
+
+
+if _core_is_stale():
+    # Order matters: features re-imports names from llm, so llm reloads first.
+    for _stale_module in (_llm, a11y, db, features):
+        importlib.reload(_stale_module)
+
+from core.llm import LLMError  # noqa: E402  — must resolve after the stale-module reload above
 
 st.set_page_config(page_title="Unhooked — AI Recovery Coach", page_icon="🔓", layout="wide")
 
