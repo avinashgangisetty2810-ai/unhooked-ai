@@ -1,0 +1,16 @@
+# Environments
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Secrets — never commit
+.streamlit/secrets.toml
+.env
+
+# Local data
+data/
+*.db
+
+# OS
+.DS_Store
