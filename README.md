@@ -97,6 +97,15 @@ Get a free Groq API key at [console.groq.com/keys](https://console.groq.com/keys
 - The app never invents progress data; every AI output cites the user's real logged history.
 - Not a substitute for professional treatment — the app says so for serious addictions.
 
+## ♿ Accessibility
+
+- **Every input has a help tooltip** explaining what it does and how the AI uses it.
+- **Charts have text alternatives** — the trend chart is accompanied by a plain-text summary of the latest values, so the data is available without vision.
+- **Emoji are never the only signal** — every status icon (🟢/🟡/🔴 risk, 💪/😔 check-ins) is paired with a text label.
+- **Full keyboard operability** — all interactions use native Streamlit widgets (forms, radios, sliders, buttons), which are keyboard-navigable and expose ARIA roles/labels out of the box.
+- **High-contrast dark theme** — the palette (#e6edf7 text on #0b1120) exceeds WCAG AA contrast ratios.
+- **Clear empty states** — first-time users are guided with explicit next-step buttons rather than blank screens.
+
 ## 📁 Project structure
 
 ```

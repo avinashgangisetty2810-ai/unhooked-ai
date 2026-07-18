@@ -44,6 +44,7 @@ _RISK_STYLE = {
 
 
 def _ai_error(exc: LLMError) -> None:
+    """Show a friendly, non-technical error when all AI providers are unavailable."""
     st.error(f"AI is temporarily unavailable — please try again in a moment. ({exc})")
 
 
@@ -56,36 +57,61 @@ def _goto(page: str) -> None:
 # ---------------------------------------------------------------- onboarding
 
 
-def _render_onboarding() -> None:
+def _render_onboarding(*, allow_cancel: bool = False) -> None:
+    """Render the profile-creation form and, on submit, create the profile and its AI plan."""
     st.title("🔓 Unhooked")
     st.subheader("Your AI coach for breaking bad habits — one day at a time.")
     st.markdown(
         "Tell us about the habit you want to break. The AI will build a **personalized "
         "4-week recovery plan** around your triggers and motivation."
     )
+    if allow_cancel and st.button("← Back to my dashboard", help="Cancel creating a new profile"):
+        st.session_state.pop("creating_profile", None)
+        st.rerun()
     with st.form("onboarding"):
         col1, col2 = st.columns(2)
         with col1:
-            name = st.text_input("Your name", max_chars=40)
-            habit_choice = st.selectbox("Habit to break", _HABIT_PRESETS)
-            habit_other = st.text_input("If other, describe it", max_chars=80)
-            goal = st.radio("Your goal", ("Quit completely", "Reduce gradually"), horizontal=True)
+            name = st.text_input("Your name", max_chars=40, help="Used to personalize your plan and coaching")
+            habit_choice = st.selectbox("Habit to break", _HABIT_PRESETS, help="Pick the closest match")
+            habit_other = st.text_input(
+                "If other, describe it", max_chars=80, help="Only needed if you chose 'Other' above"
+            )
+            goal = st.radio(
+                "Your goal",
+                ("Quit completely", "Reduce gradually"),
+                horizontal=True,
+                help="The AI shapes your weekly targets around this goal",
+            )
         with col2:
             triggers = st.text_area(
                 "What triggers it? (stress, boredom, late nights, certain people...)",
                 max_chars=300,
                 height=80,
+                help="The AI builds a defense for each trigger you list",
             )
             motivation = st.text_area(
                 "Why do you want to stop? (be honest — the AI uses this to coach you)",
                 max_chars=300,
                 height=80,
+                help="Your own words are echoed back when you need motivation most",
             )
             col_a, col_b = st.columns(2)
             with col_a:
-                daily_cost = st.number_input("Money it costs per day (₹)", min_value=0.0, value=0.0, step=10.0)
+                daily_cost = st.number_input(
+                    "Money it costs per day (₹)",
+                    min_value=0.0,
+                    value=0.0,
+                    step=10.0,
+                    help="Used to show money saved as your streak grows",
+                )
             with col_b:
-                daily_minutes = st.number_input("Time it eats per day (minutes)", min_value=0, value=60, step=15)
+                daily_minutes = st.number_input(
+                    "Time it eats per day (minutes)",
+                    min_value=0,
+                    value=60,
+                    step=15,
+                    help="Used to show time reclaimed as your streak grows",
+                )
         submitted = st.form_submit_button("Build my recovery plan →", use_container_width=True)
 
     if submitted:
@@ -111,6 +137,7 @@ def _render_onboarding() -> None:
             except (LLMError, ValueError) as exc:
                 st.session_state["plan_error"] = str(exc)
         st.session_state["profile_id"] = profile_id
+        st.session_state.pop("creating_profile", None)
         st.rerun()
 
 
@@ -118,6 +145,7 @@ def _render_onboarding() -> None:
 
 
 def _render_sidebar(profiles: list[db.Profile]) -> db.Profile | None:
+    """Render profile selection and streak in the sidebar; return the active profile."""
     with st.sidebar:
         st.markdown("## 🔓 Unhooked")
         st.caption("GenAI recovery coach")
@@ -127,10 +155,12 @@ def _render_sidebar(profiles: list[db.Profile]) -> db.Profile | None:
         default_id = st.session_state.get("profile_id", profiles[0].id)
         ids = list(labels.keys())
         index = ids.index(default_id) if default_id in ids else 0
-        chosen = st.selectbox("Profile", ids, index=index, format_func=lambda i: labels[i])
+        chosen = st.selectbox(
+            "Profile", ids, index=index, format_func=lambda i: labels[i], help="Switch between saved profiles"
+        )
         st.session_state["profile_id"] = chosen
-        if st.button("➕ New profile", use_container_width=True):
-            st.session_state["profile_id"] = None
+        if st.button("➕ New profile", use_container_width=True, help="Start onboarding for another habit"):
+            st.session_state["creating_profile"] = True
             st.rerun()
         profile = db.get_profile(chosen)
         if profile:
@@ -173,6 +203,7 @@ def _render_metrics(profile: db.Profile, streak: int, clean_days: int) -> None:
 
 
 def _render_trend_chart(checkins: list[dict[str, Any]]) -> None:
+    """Plot craving/mood over time with a text summary as a non-visual alternative."""
     st.subheader("📈 Craving & mood trend")
     if checkins:
         chart_data = {
@@ -180,6 +211,11 @@ def _render_trend_chart(checkins: list[dict[str, Any]]) -> None:
             "mood (1-5)": [c["mood"] for c in reversed(checkins)],
         }
         st.line_chart(chart_data, height=260)
+        latest = checkins[0]
+        st.caption(
+            f"Chart summary: {len(checkins)} check-ins — latest ({latest['day']}): "
+            f"craving {latest['craving']}/10, mood {latest['mood']}/5."
+        )
     else:
         st.info("Log your first daily check-in to start tracking trends.")
         if st.button("📅 Do my first check-in →"):
@@ -187,6 +223,7 @@ def _render_trend_chart(checkins: list[dict[str, Any]]) -> None:
 
 
 def _render_risk_radar(profile: db.Profile) -> None:
+    """Render AI relapse-risk analysis with a one-tap escalation to Craving SOS."""
     st.subheader("🎯 Relapse Risk Radar")
     if st.button("Analyze my current risk", use_container_width=True):
         _run_ai_action("risk", profile, features.relapse_risk, "AI analyzing your recent patterns...")
@@ -205,6 +242,7 @@ def _render_risk_radar(profile: db.Profile) -> None:
 
 
 def _render_insights(profile: db.Profile) -> None:
+    """Render AI-generated weekly wins, watch-outs, and next week's focus."""
     st.subheader("🧭 Weekly AI insights")
     if st.button("Generate insights from my data"):
         _run_ai_action("insights", profile, features.weekly_insights, "Crunching your real check-in data...")
@@ -226,6 +264,7 @@ def _render_insights(profile: db.Profile) -> None:
 
 
 def _render_dashboard(profile: db.Profile) -> None:
+    """Render the home page: progress metrics, trend chart, risk radar, and insights."""
     st.header(f"Welcome back, {profile.name} 👋")
     checkins = db.get_checkins(profile.id, limit=30)
     streak = db.current_streak(profile.id)
@@ -244,6 +283,7 @@ def _render_dashboard(profile: db.Profile) -> None:
 
 
 def _render_checkin(profile: db.Profile) -> None:
+    """Render the daily check-in form, hard-day follow-up actions, and recent history."""
     st.header("📅 Daily check-in")
     st.caption("30 seconds a day. The AI adapts its coaching to what you log.")
     today_logged = any(
@@ -260,7 +300,12 @@ def _render_checkin(profile: db.Profile) -> None:
         )
         mood = st.slider("Mood", 1, 5, 3, help="1 = rough day, 5 = great day")
         craving = st.slider("Craving intensity", 0, 10, 3, help="0 = no craving at all, 10 = overwhelming urge")
-        note = st.text_area("Anything worth noting? (optional)", max_chars=300, height=70)
+        note = st.text_area(
+            "Anything worth noting? (optional)",
+            max_chars=300,
+            height=70,
+            help="Context helps the AI spot your patterns over time",
+        )
         submitted = st.form_submit_button("Check in →", use_container_width=True)
     if submitted:
         _save_checkin(profile, status=status, mood=mood, craving=craving, note=note.strip())
@@ -299,6 +344,7 @@ def _save_checkin(profile: db.Profile, *, status: str, mood: int, craving: int, 
 
 
 def _render_checkin_history(profile: db.Profile) -> None:
+    """Render the last week of check-ins with the coach's saved responses."""
     history = db.get_checkins(profile.id, limit=7)
     if not history:
         return
@@ -317,6 +363,7 @@ def _render_checkin_history(profile: db.Profile) -> None:
 
 
 def _render_sos(profile: db.Profile) -> None:
+    """Render the craving SOS form and the AI's five-part instant intervention."""
     st.header("🆘 Craving SOS")
     st.caption("Craving hitting right now? Get an instant, personalized intervention.")
     with st.form("sos"):
@@ -324,8 +371,9 @@ def _render_sos(profile: db.Profile) -> None:
             "What's triggering you right now?",
             placeholder="e.g. stressed after a work call, bored at home alone...",
             max_chars=200,
+            help="Naming the trigger makes the intervention specific to this moment",
         )
-        intensity = st.slider("How strong is the urge?", 1, 10, 7)
+        intensity = st.slider("How strong is the urge?", 1, 10, 7, help="1 = mild itch, 10 = overwhelming")
         pressed = st.form_submit_button("🆘 HELP ME NOW", use_container_width=True, type="primary")
     if pressed:
         with st.spinner("Generating your intervention..."):
@@ -362,6 +410,7 @@ def _render_sos(profile: db.Profile) -> None:
 
 
 def _render_reframe(profile: db.Profile) -> None:
+    """Render CBT-style thought reframing with crisis-language safeguard and history."""
     st.header("🧠 Thought Reframe")
     st.caption("Write down the thought pushing you toward the habit. CBT-style AI takes it apart.")
     with st.form("reframe"):
@@ -370,6 +419,7 @@ def _render_reframe(profile: db.Profile) -> None:
             placeholder='e.g. "Just one more episode won\'t hurt" or "I\'ve had a bad day, I deserve it"',
             max_chars=300,
             height=80,
+            help="Write it exactly as it sounds in your head — the AI names the distortion and reframes it",
         )
         submitted = st.form_submit_button("Reframe it →", use_container_width=True)
     if submitted and thought.strip():
@@ -401,6 +451,7 @@ def _render_reframe(profile: db.Profile) -> None:
 
 
 def _render_coach(profile: db.Profile) -> None:
+    """Render the persistent AI coach chat grounded in the user's recovery data."""
     st.header("💬 AI Coach")
     st.caption("Available 24/7. Knows your habit, triggers, streak, and recent check-ins.")
     history = db.get_chat_messages(profile.id)
@@ -424,6 +475,7 @@ def _render_coach(profile: db.Profile) -> None:
 
 
 def _render_plan_body(plan: dict[str, Any]) -> None:
+    """Render the plan summary, mantra, weekly targets, toolkit, and trigger defenses."""
     st.markdown(f"### {plan.get('summary', '')}")
     if plan.get("mantra"):
         st.success(f"**Your mantra:** *{plan['mantra']}*")
@@ -444,6 +496,7 @@ def _render_plan_body(plan: dict[str, Any]) -> None:
 
 
 def _render_plan(profile: db.Profile) -> None:
+    """Render the current AI recovery plan with a regenerate option."""
     st.header("🗺️ My Recovery Plan")
     if not profile.plan:
         st.info("No plan yet — generate one below.")
@@ -463,9 +516,13 @@ def _render_plan(profile: db.Profile) -> None:
 
 
 def main() -> None:
+    """Route between onboarding and the six app pages based on session state."""
     profiles = db.list_profiles()
+    if st.session_state.get("creating_profile"):
+        _render_onboarding(allow_cancel=bool(profiles))
+        return
     profile = _render_sidebar(profiles)
-    if profile is None or st.session_state.get("profile_id") is None:
+    if profile is None:
         _render_onboarding()
         return
     if "_nav_target" in st.session_state:
