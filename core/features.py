@@ -8,7 +8,7 @@ cognitive-distortion reframing).
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import Any, Final
 
 from core import db
@@ -69,7 +69,9 @@ def _profile_context(profile: db.Profile) -> str:
     return "\n".join(lines)
 
 
-def generate_plan(profile: db.Profile) -> dict[str, Any]:
+def generate_plan(
+    profile: db.Profile, *, on_progress: Callable[[str], None] | None = None
+) -> dict[str, Any]:
     """Generate a personalized staged recovery plan as structured JSON."""
     prompt = f"""You are an addiction-recovery coach. Create a personalized 4-week plan to help
 this person break their habit. Be specific to THEIR habit, triggers, and motivation — no
@@ -93,7 +95,7 @@ Return ONLY a JSON object with this exact shape:
 Include exactly 4 weeks. Every tactic must be concrete and actionable.
 
 {_TONE_RULES}"""
-    plan = chat_json([{"role": "user", "content": prompt}])
+    plan = chat_json([{"role": "user", "content": prompt}], on_delta=on_progress)
     if "weeks" not in plan or not isinstance(plan["weeks"], list) or not plan["weeks"]:
         raise ValueError("Plan is missing weekly stages")
     return plan
@@ -135,7 +137,13 @@ def checkin_nudge_stream(
     return chat_stream([{"role": "user", "content": prompt}], temperature=0.8)
 
 
-def sos_intervention(profile: db.Profile, *, trigger: str, intensity: int) -> dict[str, Any]:
+def sos_intervention(
+    profile: db.Profile,
+    *,
+    trigger: str,
+    intensity: int,
+    on_progress: Callable[[str], None] | None = None,
+) -> dict[str, Any]:
     """Generate an immediate, personalized craving intervention."""
     prompt = f"""EMERGENCY: the user is having a craving RIGHT NOW and pressed the SOS button.
 
@@ -164,10 +172,12 @@ advice, and never the same wording for different triggers. Personal and urgent-f
 never clinical.
 
 {_TONE_RULES}"""
-    return chat_json([{"role": "user", "content": prompt}], temperature=0.9)
+    return chat_json([{"role": "user", "content": prompt}], temperature=0.9, on_delta=on_progress)
 
 
-def reframe_thought(profile: db.Profile, thought: str) -> dict[str, Any]:
+def reframe_thought(
+    profile: db.Profile, thought: str, *, on_progress: Callable[[str], None] | None = None
+) -> dict[str, Any]:
     """CBT-reframe an urge-thought and name the cognitive distortion."""
     prompt = f"""You are a CBT therapist. The user wrote down a thought that is pushing them
 toward their habit.
@@ -186,10 +196,12 @@ Return ONLY a JSON object:
 }}
 
 {_TONE_RULES}"""
-    return chat_json([{"role": "user", "content": prompt}], temperature=0.7)
+    return chat_json([{"role": "user", "content": prompt}], temperature=0.7, on_delta=on_progress)
 
 
-def relapse_risk(profile: db.Profile) -> dict[str, Any]:
+def relapse_risk(
+    profile: db.Profile, *, on_progress: Callable[[str], None] | None = None
+) -> dict[str, Any]:
     """Analyze recent check-ins and estimate relapse risk with reasoning."""
     checkins = db.get_checkins(profile.id, limit=14)
     if not checkins:
@@ -213,13 +225,15 @@ Return ONLY a JSON object:
 }}
 
 {_TONE_RULES}"""
-    result = chat_json([{"role": "user", "content": prompt}], temperature=0.4)
+    result = chat_json([{"role": "user", "content": prompt}], temperature=0.4, on_delta=on_progress)
     if result.get("level") not in {"low", "watch", "high"}:
         result["level"] = "watch"
     return result
 
 
-def weekly_insights(profile: db.Profile) -> dict[str, Any]:
+def weekly_insights(
+    profile: db.Profile, *, on_progress: Callable[[str], None] | None = None
+) -> dict[str, Any]:
     """Generate a weekly progress report from real check-in data."""
     checkins = db.get_checkins(profile.id, limit=14)
     prompt = f"""You are a habit-change data analyst. Write this user's progress insights from
@@ -240,7 +254,7 @@ Return ONLY a JSON object:
 Cite actual numbers from the data (streak, moods, craving levels).
 
 {_TONE_RULES}"""
-    return chat_json([{"role": "user", "content": prompt}], temperature=0.5)
+    return chat_json([{"role": "user", "content": prompt}], temperature=0.5, on_delta=on_progress)
 
 
 def _coach_messages(

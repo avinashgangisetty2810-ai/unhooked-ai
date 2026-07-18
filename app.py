@@ -64,6 +64,22 @@ def _goto(page: str) -> None:
     st.rerun()
 
 
+def _live_progress(label: str) -> tuple[Any, Any]:
+    """Return an (empty placeholder, on_progress callback) pair showing live generation.
+
+    The callback receives the accumulated streamed text and updates the placeholder
+    with a word ticker so the user always sees that the AI is actively writing.
+    """
+    placeholder = st.empty()
+    placeholder.info(f"✨ {label}…")
+
+    def _on_progress(text: str) -> None:
+        words = len(text.split())
+        placeholder.info(f"✨ {label}… **{words} words written** ▌")
+
+    return placeholder, _on_progress
+
+
 # ---------------------------------------------------------------- onboarding
 
 
@@ -142,12 +158,13 @@ def _render_onboarding(*, allow_cancel: bool = False) -> None:
         )
         profile = db.get_profile(profile_id)
         assert profile is not None
-        with st.spinner("🧠 Your AI coach is designing your personalized plan..."):
-            try:
-                plan = features.generate_plan(profile)
-                db.save_plan(profile_id, plan)
-            except (LLMError, ValueError) as exc:
-                st.session_state["plan_error"] = str(exc)
+        placeholder, on_progress = _live_progress("🧠 Your AI coach is designing your personalized plan")
+        try:
+            plan = features.generate_plan(profile, on_progress=on_progress)
+            db.save_plan(profile_id, plan)
+        except (LLMError, ValueError) as exc:
+            st.session_state["plan_error"] = str(exc)
+        placeholder.empty()
         st.session_state["profile_id"] = profile_id
         st.session_state.pop("creating_profile", None)
         st.rerun()
@@ -221,15 +238,16 @@ def _cached_result(kind: str, profile_id: int) -> dict[str, Any] | None:
     return result
 
 
-def _run_ai_action(kind: str, profile: db.Profile, action: Any, spinner: str) -> None:
-    """Run an AI feature, persist the result as an event, and cache it in session state."""
-    with st.spinner(spinner):
-        try:
-            result = action(profile)
-            db.log_event(profile.id, kind, result)
-            st.session_state[kind] = result
-        except LLMError as exc:
-            _ai_error(exc)
+def _run_ai_action(kind: str, profile: db.Profile, action: Any, label: str) -> None:
+    """Run an AI feature with live progress, persist the result, and cache it in session state."""
+    placeholder, on_progress = _live_progress(label)
+    try:
+        result = action(profile, on_progress=on_progress)
+        db.log_event(profile.id, kind, result)
+        st.session_state[kind] = result
+    except LLMError as exc:
+        _ai_error(exc)
+    placeholder.empty()
 
 
 def _render_metrics(profile: db.Profile, streak: int, clean_days: int) -> None:
@@ -425,14 +443,15 @@ def _render_sos(profile: db.Profile) -> None:
             "🆘 HELP ME NOW", use_container_width=True, type="primary", help="Generate a 5-part instant intervention"
         )
     if pressed:
-        with st.spinner("Generating your intervention..."):
-            try:
-                sos_result = features.sos_intervention(
-                    profile, trigger=trigger.strip() or "unknown", intensity=intensity
-                )
-            except LLMError as exc:
-                _ai_error(exc)
-                return
+        placeholder, on_progress = _live_progress("Writing your personalized intervention")
+        try:
+            sos_result = features.sos_intervention(
+                profile, trigger=trigger.strip() or "unknown", intensity=intensity, on_progress=on_progress
+            )
+        except LLMError as exc:
+            _ai_error(exc)
+            return
+        placeholder.empty()
         db.log_event(profile.id, "sos", {"trigger": trigger, "intensity": intensity, **sos_result})
         st.session_state["last_sos"] = sos_result
     sos: dict[str, Any] | None = st.session_state.get("last_sos")
@@ -478,12 +497,13 @@ def _render_reframe(profile: db.Profile) -> None:
         if features.is_crisis(thought):
             st.warning(features.CRISIS_MESSAGE)
             return
-        with st.spinner("Analyzing the thought..."):
-            try:
-                result = features.reframe_thought(profile, thought.strip())
-            except LLMError as exc:
-                _ai_error(exc)
-                return
+        placeholder, on_progress = _live_progress("Taking that thought apart")
+        try:
+            result = features.reframe_thought(profile, thought.strip(), on_progress=on_progress)
+        except LLMError as exc:
+            _ai_error(exc)
+            return
+        placeholder.empty()
         db.log_event(profile.id, "reframe", {"thought": thought.strip(), **result})
         st.markdown(f"**🔍 Distortion spotted:** `{result.get('distortion', '')}`")
         st.write(result.get("why", ""))
@@ -554,13 +574,14 @@ def _render_plan(profile: db.Profile) -> None:
     else:
         _render_plan_body(profile.plan)
     if st.button("🔄 Regenerate plan with AI", help="Rebuild the 4-week plan from your current profile"):
-        with st.spinner("Rebuilding your plan..."):
-            try:
-                new_plan = features.generate_plan(profile)
-                db.save_plan(profile.id, new_plan)
-                st.rerun()
-            except (LLMError, ValueError) as exc:
-                st.error(f"Could not regenerate the plan: {exc}")
+        placeholder, on_progress = _live_progress("Rebuilding your plan")
+        try:
+            new_plan = features.generate_plan(profile, on_progress=on_progress)
+            db.save_plan(profile.id, new_plan)
+            st.rerun()
+        except (LLMError, ValueError) as exc:
+            placeholder.empty()
+            st.error(f"Could not regenerate the plan: {exc}")
 
 
 # --------------------------------------------------------------------- main

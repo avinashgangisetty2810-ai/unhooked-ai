@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import os
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import Any, Final
 
 import requests
@@ -147,6 +147,7 @@ def chat_stream(
     messages: list[dict[str, str]],
     *,
     temperature: float = 0.7,
+    json_mode: bool = False,
 ) -> Iterator[str]:
     """Yield the assistant reply incrementally for live typing in the UI.
 
@@ -157,6 +158,7 @@ def chat_stream(
     Args:
         messages: OpenAI-style message dicts (``role``/``content``).
         temperature: Sampling temperature.
+        json_mode: Force the model to emit a single JSON object.
 
     Yields:
         Reply text fragments in generation order.
@@ -174,6 +176,8 @@ def chat_stream(
             "max_tokens": 2048,
             "stream": True,
         }
+        if json_mode:
+            payload["response_format"] = {"type": "json_object"}
         yielded = False
         try:
             with requests.post(
@@ -202,20 +206,15 @@ def chat_stream(
         except (requests.RequestException, KeyError, IndexError, ValueError):
             if yielded:  # partial reply already shown — don't duplicate via fallback
                 return
-    yield chat(messages, temperature=temperature)
+    yield chat(messages, json_mode=json_mode, temperature=temperature)
 
 
-def chat_json(
-    messages: list[dict[str, str]],
-    *,
-    temperature: float = 0.6,
-) -> dict[str, Any]:
-    """Like :func:`chat` but parses and returns the reply as a JSON object.
+def _parse_json_object(raw: str) -> dict[str, Any]:
+    """Parse an LLM reply into a JSON object, tolerating markdown code fences.
 
     Raises:
-        LLMError: If the reply is not valid JSON or all providers fail.
+        LLMError: If the reply is not a valid JSON object.
     """
-    raw = chat(messages, json_mode=True, temperature=temperature)
     try:
         cleaned = raw.strip()
         if cleaned.startswith("```"):
@@ -227,3 +226,31 @@ def chat_json(
     if not isinstance(data, dict):
         raise LLMError("AI returned JSON that is not an object")
     return data
+
+
+def chat_json(
+    messages: list[dict[str, str]],
+    *,
+    temperature: float = 0.6,
+    on_delta: Callable[[str], None] | None = None,
+) -> dict[str, Any]:
+    """Like :func:`chat` but parses and returns the reply as a JSON object.
+
+    Args:
+        messages: OpenAI-style message dicts.
+        temperature: Sampling temperature.
+        on_delta: Optional live-progress callback — when given, the reply is
+            streamed and the callback receives the accumulated text after each
+            chunk so the UI can show that generation is underway.
+
+    Raises:
+        LLMError: If the reply is not valid JSON or all providers fail.
+    """
+    if on_delta is not None:
+        buffer: list[str] = []
+        for chunk in chat_stream(messages, temperature=temperature, json_mode=True):
+            buffer.append(chunk)
+            on_delta("".join(buffer))
+        return _parse_json_object("".join(buffer))
+    raw = chat(messages, json_mode=True, temperature=temperature)
+    return _parse_json_object(raw)

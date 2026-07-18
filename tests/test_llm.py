@@ -205,3 +205,26 @@ class TestChatStream:
                 chunks = list(llm.chat_stream([{"role": "user", "content": "hi"}]))
         chat.assert_called_once()
         assert chunks == ["fallback"]
+
+    def test_json_mode_sets_response_format_and_propagates_to_fallback(self) -> None:
+        with patch.object(llm.requests, "post", return_value=_sse_response([], status=500)) as post:
+            with patch.object(llm, "chat", return_value="{}") as chat:
+                list(llm.chat_stream([{"role": "user", "content": "hi"}], json_mode=True))
+        assert post.call_args.kwargs["json"]["response_format"] == {"type": "json_object"}
+        assert chat.call_args.kwargs["json_mode"] is True
+
+
+class TestChatJsonStreaming:
+    def test_on_delta_receives_accumulated_text_and_result_parses(self) -> None:
+        lines = [_sse_line('{"a"'), _sse_line(": 1}"), b"data: [DONE]"]
+        seen: list[str] = []
+        with patch.object(llm.requests, "post", return_value=_sse_response(lines)):
+            result = llm.chat_json([{"role": "user", "content": "hi"}], on_delta=seen.append)
+        assert result == {"a": 1}
+        assert seen == ['{"a"', '{"a": 1}']  # accumulated, in order
+
+    def test_on_delta_malformed_stream_raises(self) -> None:
+        lines = [_sse_line("not json"), b"data: [DONE]"]
+        with patch.object(llm.requests, "post", return_value=_sse_response(lines)):
+            with pytest.raises(llm.LLMError, match="malformed JSON"):
+                llm.chat_json([{"role": "user", "content": "hi"}], on_delta=lambda _: None)

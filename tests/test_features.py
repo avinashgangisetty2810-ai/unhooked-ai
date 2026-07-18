@@ -169,6 +169,22 @@ class TestStreamingVariants:
         assert "status=clean" in prompt
         assert "gym" in prompt
 
+    def test_json_features_forward_on_progress_for_live_ui(self, profile: db.Profile) -> None:
+        db.upsert_checkin(profile_id=profile.id, status="clean", mood=4, craving=3, note="", ai_response="")
+        callback = lambda _text: None  # noqa: E731
+        plan = {"weeks": [{"week": 1}]}
+        calls = [
+            lambda: features.generate_plan(profile, on_progress=callback),
+            lambda: features.sos_intervention(profile, trigger="stress", intensity=8, on_progress=callback),
+            lambda: features.reframe_thought(profile, "just one", on_progress=callback),
+            lambda: features.relapse_risk(profile, on_progress=callback),
+            lambda: features.weekly_insights(profile, on_progress=callback),
+        ]
+        for call in calls:
+            with patch.object(features, "chat_json", return_value=plan) as cj:
+                call()
+            assert cj.call_args.kwargs["on_delta"] is callback
+
 
 class TestToneContract:
     """Every user-facing AI prompt must carry the motivating/plain-language tone rules."""
