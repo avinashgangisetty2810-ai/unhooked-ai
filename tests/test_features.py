@@ -110,9 +110,19 @@ class TestContextAndReplies:
         assert "gym" in prompt
 
     def test_sos_intervention_returns_llm_payload(self, profile: db.Profile) -> None:
-        payload = {"urge_surf": "u", "distraction": "d", "reframe": "r", "future_you": "f", "breathing": "b"}
+        payload = {"urge_surf": "u", "distraction": "d", "reframe": "r", "future_you": "f", "grounding": "g"}
         with patch.object(features, "chat_json", return_value=payload):
             assert features.sos_intervention(profile, trigger="stress", intensity=8) == payload
+
+    def test_sos_prompt_demands_varied_personalized_grounding(self, profile: db.Profile) -> None:
+        with patch.object(features, "chat_json", return_value={}) as cj:
+            features.sos_intervention(profile, trigger="bored at home", intensity=9)
+        prompt = cj.call_args.args[0][0]["content"]
+        assert "grounding_title" in prompt
+        assert "Do NOT" in prompt and "box breathing" in prompt  # forbids the default technique
+        assert "bored at home" in prompt
+        assert "Smoking" in prompt  # habit is injected verbatim
+        assert "never the same wording for different triggers" in prompt
 
     def test_reframe_thought_includes_thought_in_prompt(self, profile: db.Profile) -> None:
         with patch.object(features, "chat_json", return_value={"distortion": "permission-giving"}) as cj:
@@ -132,3 +142,29 @@ class TestContextAndReplies:
         payload = {"headline": "h", "wins": ["w"], "watch_outs": ["x"], "next_week_focus": "f"}
         with patch.object(features, "chat_json", return_value=payload):
             assert features.weekly_insights(profile) == payload
+
+
+class TestStreamingVariants:
+    def test_coach_reply_stream_short_circuits_on_crisis(self, profile: db.Profile) -> None:
+        with patch.object(features, "chat_stream") as cs:
+            chunks = list(features.coach_reply_stream(profile, [], "I want to end my life"))
+        cs.assert_not_called()
+        assert chunks == [features.CRISIS_MESSAGE]
+
+    def test_coach_reply_stream_delegates_with_same_messages(self, profile: db.Profile) -> None:
+        history = [{"role": "user", "content": f"msg {i}"} for i in range(20)]
+        with patch.object(features, "chat_stream", return_value=iter(["a", "b"])) as cs:
+            chunks = list(features.coach_reply_stream(profile, history, "help me"))
+        assert chunks == ["a", "b"]
+        messages = cs.call_args.args[0]
+        assert messages[0]["role"] == "system"
+        assert len(messages) == 1 + 12 + 1
+        assert messages[-1]["content"] == "help me"
+
+    def test_checkin_nudge_stream_delegates_with_todays_data(self, profile: db.Profile) -> None:
+        with patch.object(features, "chat_stream", return_value=iter(["nice"])) as cs:
+            chunks = list(features.checkin_nudge_stream(profile, status="clean", mood=5, craving=1, note="gym"))
+        assert chunks == ["nice"]
+        prompt = cs.call_args.args[0][0]["content"]
+        assert "status=clean" in prompt
+        assert "gym" in prompt

@@ -125,3 +125,83 @@ class TestChatJson:
         with patch.object(llm.requests, "post", return_value=_groq_ok("[1, 2]")):
             with pytest.raises(llm.LLMError, match="not an object"):
                 llm.chat_json([{"role": "user", "content": "hi"}])
+
+
+def _sse_line(content: str) -> bytes:
+    return b"data: " + json.dumps({"choices": [{"delta": {"content": content}}]}).encode()
+
+
+def _sse_response(lines: Any, status: int = 200) -> MagicMock:
+    resp = MagicMock()
+    resp.status_code = status
+    resp.iter_lines.return_value = lines
+    if status >= 400:
+        resp.raise_for_status.side_effect = requests.HTTPError(response=resp)
+    resp.__enter__ = MagicMock(return_value=resp)
+    resp.__exit__ = MagicMock(return_value=False)
+    return resp
+
+
+class TestChatStream:
+    def test_streams_chunks_until_done(self) -> None:
+        lines = [_sse_line("Hel"), _sse_line("lo"), b"data: [DONE]", _sse_line("never")]
+        with patch.object(llm.requests, "post", return_value=_sse_response(lines)) as post:
+            chunks = list(llm.chat_stream([{"role": "user", "content": "hi"}]))
+        assert chunks == ["Hel", "lo"]
+        assert post.call_args.kwargs["json"]["stream"] is True
+        assert post.call_args.kwargs["stream"] is True
+
+    def test_skips_blank_non_data_and_empty_delta_lines(self) -> None:
+        lines = [b"", b": keep-alive", _sse_line(""), "data: [DONE]", _sse_line("never")]
+        with patch.object(llm.requests, "post", return_value=_sse_response(lines)):
+            with patch.object(llm, "chat", return_value="fallback") as chat:
+                chunks = list(llm.chat_stream([{"role": "user", "content": "hi"}]))
+        # nothing streamed before [DONE] -> falls through to the blocking chain
+        chat.assert_called_once()
+        assert chunks == ["fallback"]
+
+    def test_stream_ends_without_done_after_chunks(self) -> None:
+        lines = [_sse_line("partial")]
+        with patch.object(llm.requests, "post", return_value=_sse_response(lines)):
+            with patch.object(llm, "chat") as chat:
+                chunks = list(llm.chat_stream([{"role": "user", "content": "hi"}]))
+        chat.assert_not_called()
+        assert chunks == ["partial"]
+
+    def test_missing_key_falls_back_to_chat(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("GROQ_API_KEY", "")
+        with patch("streamlit.secrets") as secrets:
+            secrets.load_if_toml_exists.return_value = False
+            with patch.object(llm, "chat", return_value="full reply") as chat:
+                chunks = list(llm.chat_stream([{"role": "user", "content": "hi"}]))
+        chat.assert_called_once()
+        assert chunks == ["full reply"]
+
+    def test_http_error_falls_back_to_chat(self) -> None:
+        with patch.object(llm.requests, "post", return_value=_sse_response([], status=500)):
+            with patch.object(llm, "chat", return_value="fallback") as chat:
+                chunks = list(llm.chat_stream([{"role": "user", "content": "hi"}]))
+        chat.assert_called_once()
+        assert chunks == ["fallback"]
+
+    def test_error_after_first_chunk_stops_without_fallback(self) -> None:
+        def _lines() -> Any:
+            yield _sse_line("partial")
+            raise requests.ConnectionError("dropped")
+
+        with patch.object(llm.requests, "post", return_value=_sse_response(_lines())):
+            with patch.object(llm, "chat") as chat:
+                chunks = list(llm.chat_stream([{"role": "user", "content": "hi"}]))
+        chat.assert_not_called()  # never duplicate a partially shown reply
+        assert chunks == ["partial"]
+
+    def test_error_before_first_chunk_falls_back(self) -> None:
+        def _lines() -> Any:
+            raise requests.ConnectionError("dropped")
+            yield  # pragma: no cover
+
+        with patch.object(llm.requests, "post", return_value=_sse_response(_lines())):
+            with patch.object(llm, "chat", return_value="fallback") as chat:
+                chunks = list(llm.chat_stream([{"role": "user", "content": "hi"}]))
+        chat.assert_called_once()
+        assert chunks == ["fallback"]

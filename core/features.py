@@ -8,10 +8,11 @@ cognitive-distortion reframing).
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import Any, Final
 
 from core import db
-from core.llm import chat, chat_json
+from core.llm import chat, chat_json, chat_stream
 
 _CRISIS_KEYWORDS: Final[tuple[str, ...]] = (
     "kill myself",
@@ -87,10 +88,10 @@ Include exactly 4 weeks. Every tactic must be concrete and actionable."""
     return plan
 
 
-def checkin_nudge(profile: db.Profile, *, status: str, mood: int, craving: int, note: str) -> str:
-    """React to today's check-in with a context-aware coaching message."""
+def _nudge_prompt(profile: db.Profile, *, status: str, mood: int, craving: int, note: str) -> str:
+    """Build the check-in reaction prompt shared by blocking and streaming variants."""
     streak = db.current_streak(profile.id)
-    prompt = f"""You are a warm, direct recovery coach. The user just submitted today's check-in.
+    return f"""You are a warm, direct recovery coach. The user just submitted today's check-in.
 
 {_profile_context(profile)}
 
@@ -104,7 +105,20 @@ Write a 3-5 sentence personal response. Rules:
   concrete action for the next 24 hours.
 - If craving >= 7: acknowledge how hard today was.
 - Speak directly to {profile.name}. No headers, no bullet lists, just the message."""
+
+
+def checkin_nudge(profile: db.Profile, *, status: str, mood: int, craving: int, note: str) -> str:
+    """React to today's check-in with a context-aware coaching message."""
+    prompt = _nudge_prompt(profile, status=status, mood=mood, craving=craving, note=note)
     return chat([{"role": "user", "content": prompt}], temperature=0.8)
+
+
+def checkin_nudge_stream(
+    profile: db.Profile, *, status: str, mood: int, craving: int, note: str
+) -> Iterator[str]:
+    """Streaming variant of :func:`checkin_nudge` for live typing in the UI."""
+    prompt = _nudge_prompt(profile, status=status, mood=mood, craving=craving, note=note)
+    return chat_stream([{"role": "user", "content": prompt}], temperature=0.8)
 
 
 def sos_intervention(profile: db.Profile, *, trigger: str, intensity: int) -> dict[str, Any]:
@@ -116,15 +130,24 @@ def sos_intervention(profile: db.Profile, *, trigger: str, intensity: int) -> di
 Current trigger: {trigger}
 Craving intensity: {intensity}/10
 
+First, choose ONE grounding technique that best fits THIS trigger and intensity. Do NOT
+default to box breathing — rotate between options such as: 5-4-3-2-1 senses scan, cold water
+on the face, 10 slow shoulder rolls, a brisk 2-minute walk, clench-and-release fists,
+humming a long exhale, paced breathing. At intensity 8+, prefer a physical action over a
+pure breathing exercise.
+
 Return ONLY a JSON object:
 {{
-  "urge_surf": "a 60-second guided urge-surfing script in second person, calm and specific to their habit",
-  "distraction": "one concrete 5-minute distraction task doable right now given the trigger",
-  "reframe": "one sentence that reframes this exact craving moment",
-  "future_you": "2-3 sentences from their future self who broke the habit, referencing their motivation",
-  "breathing": "a simple counted breathing pattern instruction (one line)"
+  "grounding_title": "3-5 word name of the chosen technique",
+  "grounding": "2-3 sentences, second person, telling them exactly how to do it right now",
+  "urge_surf": "a 60-second guided urge-surfing script naming their habit ({profile.habit})",
+  "distraction": "one concrete 5-minute task that fits the trigger '{trigger}' right now",
+  "reframe": "one sentence reframing THIS exact craving, mentioning the trigger",
+  "future_you": "2-3 sentences from their future self who broke the habit, quoting their motivation"
 }}
-Make it feel personal and urgent-friendly, never clinical."""
+Every field must be specific to this person, this trigger, and this moment — no generic
+advice, and never the same wording for different triggers. Personal and urgent-friendly,
+never clinical."""
     return chat_json([{"role": "user", "content": prompt}], temperature=0.9)
 
 
@@ -198,10 +221,10 @@ Cite actual numbers from the data (streak, moods, craving levels)."""
     return chat_json([{"role": "user", "content": prompt}], temperature=0.5)
 
 
-def coach_reply(profile: db.Profile, history: list[dict[str, str]], user_message: str) -> str:
-    """Multi-turn coach chat grounded in the user's live profile and data."""
-    if is_crisis(user_message):
-        return CRISIS_MESSAGE
+def _coach_messages(
+    profile: db.Profile, history: list[dict[str, str]], user_message: str
+) -> list[dict[str, str]]:
+    """Build the grounded coach-chat message list shared by blocking and streaming variants."""
     system = f"""You are Unhooked's recovery coach: warm, practical, non-judgmental, and brief
 (2-6 sentences unless asked for detail). You use CBT and motivational-interviewing techniques.
 You know this user's real data:
@@ -215,4 +238,21 @@ https://findahelpline.com immediately."""
     messages: list[dict[str, str]] = [{"role": "system", "content": system}]
     messages.extend(history[-12:])
     messages.append({"role": "user", "content": user_message})
-    return chat(messages, temperature=0.7)
+    return messages
+
+
+def coach_reply(profile: db.Profile, history: list[dict[str, str]], user_message: str) -> str:
+    """Multi-turn coach chat grounded in the user's live profile and data."""
+    if is_crisis(user_message):
+        return CRISIS_MESSAGE
+    return chat(_coach_messages(profile, history, user_message), temperature=0.7)
+
+
+def coach_reply_stream(
+    profile: db.Profile, history: list[dict[str, str]], user_message: str
+) -> Iterator[str]:
+    """Streaming variant of :func:`coach_reply` — yields the reply as it is generated."""
+    if is_crisis(user_message):
+        yield CRISIS_MESSAGE
+        return
+    yield from chat_stream(_coach_messages(profile, history, user_message), temperature=0.7)

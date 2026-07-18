@@ -59,6 +59,7 @@ def _inject_accessibility() -> None:
 
 def _goto(page: str) -> None:
     """Queue a navigation to another page and rerun (applied before the nav widget renders)."""
+    st.session_state.pop("last_sos", None)  # don't re-show a stale intervention on return
     st.session_state["_nav_target"] = page
     st.rerun()
 
@@ -366,13 +367,17 @@ def _render_checkin(profile: db.Profile) -> None:
 
 
 def _save_checkin(profile: db.Profile, *, status: str, mood: int, craving: int, note: str) -> None:
-    """Persist today's check-in with an AI nudge and flag hard days for follow-up."""
-    with st.spinner("Your coach is reading your check-in..."):
-        try:
-            nudge = features.checkin_nudge(profile, status=status, mood=mood, craving=craving, note=note)
-        except LLMError as exc:
-            _ai_error(exc)
-            nudge = ""
+    """Persist today's check-in with a live-streamed AI nudge and flag hard days for follow-up."""
+    nudge = ""
+    try:
+        with st.chat_message("assistant"):
+            nudge = str(
+                st.write_stream(
+                    features.checkin_nudge_stream(profile, status=status, mood=mood, craving=craving, note=note)
+                )
+            )
+    except LLMError as exc:
+        _ai_error(exc)
     db.upsert_checkin(
         profile_id=profile.id,
         status=status,
@@ -381,8 +386,6 @@ def _save_checkin(profile: db.Profile, *, status: str, mood: int, craving: int, 
         note=note,
         ai_response=nudge,
     )
-    if nudge:
-        st.chat_message("assistant").write(nudge)
     st.toast("Check-in saved ✅")
     st.session_state["checkin_followup"] = status == "slip" or craving >= 7
 
@@ -434,8 +437,9 @@ def _render_sos(profile: db.Profile) -> None:
         st.session_state["last_sos"] = sos_result
     sos: dict[str, Any] | None = st.session_state.get("last_sos")
     if sos:
-        st.markdown("### 🌬️ First, breathe")
-        st.info(sos.get("breathing", ""))
+        grounding_title = sos.get("grounding_title") or "First, breathe"
+        st.markdown(f"### 🌬️ {grounding_title}")
+        st.info(sos.get("grounding") or sos.get("breathing", ""))
         st.markdown("### 🏄 Ride the urge (60 seconds)")
         st.write(sos.get("urge_surf", ""))
         col1, col2 = st.columns(2)
@@ -509,14 +513,13 @@ def _render_coach(profile: db.Profile) -> None:
     if user_message:
         st.chat_message("user").write(user_message)
         db.add_chat_message(profile.id, "user", user_message)
-        with st.spinner("Coach is typing..."):
-            try:
-                reply = features.coach_reply(profile, history, user_message)
-            except LLMError as exc:
-                _ai_error(exc)
-                return
+        try:
+            with st.chat_message("assistant"):
+                reply = str(st.write_stream(features.coach_reply_stream(profile, history, user_message)))
+        except LLMError as exc:
+            _ai_error(exc)
+            return
         db.add_chat_message(profile.id, "assistant", reply)
-        st.chat_message("assistant").write(reply)
 
 
 # --------------------------------------------------------------------- plan

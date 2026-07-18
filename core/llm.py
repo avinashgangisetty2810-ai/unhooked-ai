@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import time
+from collections.abc import Iterator
 from typing import Any, Final
 
 import requests
@@ -140,6 +141,68 @@ def chat(
                 errors.append(f"{provider_name}: {type(exc).__name__}")
                 break
     raise LLMError("All AI providers failed (" + "; ".join(errors) + ")")
+
+
+def chat_stream(
+    messages: list[dict[str, str]],
+    *,
+    temperature: float = 0.7,
+) -> Iterator[str]:
+    """Yield the assistant reply incrementally for live typing in the UI.
+
+    Streams token chunks from Groq (SSE). On any streaming failure before the
+    first chunk, falls back to the full provider chain and yields the complete
+    reply as a single chunk — so callers always get text or an :class:`LLMError`.
+
+    Args:
+        messages: OpenAI-style message dicts (``role``/``content``).
+        temperature: Sampling temperature.
+
+    Yields:
+        Reply text fragments in generation order.
+
+    Raises:
+        LLMError: If streaming and every fallback provider fail.
+    """
+    api_key = _read_secret("GROQ_API_KEY")
+    if api_key:
+        model = _read_secret("GROQ_MODEL") or _DEFAULT_GROQ_MODEL
+        payload: dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": 2048,
+            "stream": True,
+        }
+        yielded = False
+        try:
+            with requests.post(
+                _GROQ_URL,
+                headers={"Authorization": f"Bearer {api_key}"},
+                json=payload,
+                timeout=_TIMEOUT_SECONDS,
+                stream=True,
+            ) as response:
+                response.raise_for_status()
+                for raw_line in response.iter_lines():
+                    if not raw_line:
+                        continue
+                    line = raw_line.decode("utf-8") if isinstance(raw_line, bytes) else raw_line
+                    if not line.startswith("data: "):
+                        continue
+                    data = line[len("data: ") :]
+                    if data.strip() == "[DONE]":
+                        break  # fall back below if the stream produced no text
+                    delta = json.loads(data)["choices"][0].get("delta", {}).get("content")
+                    if delta:
+                        yielded = True
+                        yield delta
+                if yielded:
+                    return
+        except (requests.RequestException, KeyError, IndexError, ValueError):
+            if yielded:  # partial reply already shown — don't duplicate via fallback
+                return
+    yield chat(messages, temperature=temperature)
 
 
 def chat_json(
