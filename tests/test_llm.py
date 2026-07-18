@@ -47,6 +47,14 @@ class TestReadSecret:
             secrets.load_if_toml_exists.return_value = False
             assert llm._read_secret("NOPE_SECRET") == ""
 
+    def test_streamlit_secrets_used_when_env_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("TOML_SECRET", raising=False)
+        with patch("streamlit.secrets") as secrets:
+            secrets.load_if_toml_exists.return_value = True
+            secrets.get.return_value = "from-toml"
+            assert llm._read_secret("TOML_SECRET") == "from-toml"
+        secrets.get.assert_called_once_with("TOML_SECRET", "")
+
 
 class TestChat:
     def test_groq_success(self) -> None:
