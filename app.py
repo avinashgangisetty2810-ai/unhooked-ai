@@ -6,13 +6,24 @@ Gemini fallback); progress metrics are deterministic Python over real SQLite dat
 
 from __future__ import annotations
 
+import importlib
+import inspect
 from datetime import date
 from typing import Any
 
 import streamlit as st
 
 from core import a11y, db, features
-from core.llm import LLMError
+from core import llm as _llm
+
+# Streamlit Cloud re-executes app.py on git push but keeps previously imported
+# package modules cached — a new app.py can then call into stale core/ code
+# (e.g. TypeError: unexpected keyword argument). Reload if the cache is stale.
+if "on_progress" not in inspect.signature(features.sos_intervention).parameters:
+    importlib.reload(_llm)
+    features = importlib.reload(features)
+
+from core.llm import LLMError  # noqa: E402  (must follow the stale-module guard)
 
 st.set_page_config(page_title="Unhooked — AI Recovery Coach", page_icon="🔓", layout="wide")
 
