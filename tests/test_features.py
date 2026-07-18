@@ -55,7 +55,7 @@ class TestGeneratePlan:
         with patch.object(features, "chat_json", return_value=plan):
             assert features.generate_plan(profile) == plan
 
-    @pytest.mark.parametrize("bad_plan", [{}, {"weeks": []}, {"weeks": "not a list"}])
+    @pytest.mark.parametrize("bad_plan", [{}, {"weeks": []}, {"weeks": "not a list"}, {"weeks": ["week 1 as text"]}])
     def test_plan_without_weeks_rejected(self, profile: db.Profile, bad_plan: dict[str, Any]) -> None:
         with patch.object(features, "chat_json", return_value=bad_plan):
             with pytest.raises(ValueError, match="weekly stages"):

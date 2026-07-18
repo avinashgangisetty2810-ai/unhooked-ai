@@ -94,7 +94,8 @@ Include exactly 4 weeks. Every tactic must be concrete and actionable.
 
 {_TONE_RULES}"""
     plan = chat_json([{"role": "user", "content": prompt}], on_delta=on_progress)
-    if "weeks" not in plan or not isinstance(plan["weeks"], list) or not plan["weeks"]:
+    weeks = plan.get("weeks")
+    if not isinstance(weeks, list) or not weeks or not all(isinstance(week, dict) for week in weeks):
         raise ValueError("Plan is missing weekly stages")
     return plan
 

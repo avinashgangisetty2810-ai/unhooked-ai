@@ -578,7 +578,9 @@ def _render_plan_body(plan: dict[str, Any]) -> None:
     st.markdown(f"### {plan.get('summary', '')}")
     if plan.get("mantra"):
         st.success(f"**Your mantra:** *{plan['mantra']}*")
-    for week in plan.get("weeks", []):
+    # Plans are LLM-generated JSON; skip malformed entries instead of crashing.
+    weeks = plan.get("weeks") or []
+    for week in (w for w in weeks if isinstance(w, dict)):
         with st.expander(f"Week {week.get('week')} — {week.get('theme', '')}", expanded=week.get("week") == 1):
             st.markdown(f"**Target:** {week.get('target', '')}")
             for tactic in week.get("tactics", []):
@@ -590,7 +592,7 @@ def _render_plan_body(plan: dict[str, Any]) -> None:
             st.markdown(f"- {tool}")
     with col2:
         st.subheader("🛡️ Trigger defenses")
-        for item in plan.get("trigger_defenses", []):
+        for item in (d for d in plan.get("trigger_defenses", []) if isinstance(d, dict)):
             st.markdown(f"- **{item.get('trigger', '')}:** {item.get('defense', '')}")
 
 
