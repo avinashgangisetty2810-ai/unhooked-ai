@@ -1,3 +1,4 @@
 streamlit==1.41.1
 requests==2.32.3
-pyarrow==18.1.0
+# pyarrow 25.x segfaults on macOS ARM (mimalloc); pin only for local dev on Mac.
+pyarrow==18.1.0; sys_platform == "darwin"
