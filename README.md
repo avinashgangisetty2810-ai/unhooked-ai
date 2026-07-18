@@ -97,23 +97,36 @@ Get a free Groq API key at [console.groq.com/keys](https://console.groq.com/keys
 - The app never invents progress data; every AI output cites the user's real logged history.
 - Not a substitute for professional treatment — the app says so for serious addictions.
 
-## ♿ Accessibility
+## ♿ Accessibility — WCAG 2.1 AA
 
-- **Every input has a help tooltip** explaining what it does and how the AI uses it.
-- **Charts have text alternatives** — the trend chart is accompanied by a plain-text summary of the latest values, so the data is available without vision.
-- **Emoji are never the only signal** — every status icon (🟢/🟡/🔴 risk, 💪/😔 check-ins) is paired with a text label.
-- **Full keyboard operability** — all interactions use native Streamlit widgets (forms, radios, sliders, buttons), which are keyboard-navigable and expose ARIA roles/labels out of the box.
-- **High-contrast dark theme** — the palette (#e6edf7 text on #0b1120) exceeds WCAG AA contrast ratios.
-- **Clear empty states** — first-time users are guided with explicit next-step buttons rather than blank screens.
+Full conformance statement with success-criterion mapping: **[ACCESSIBILITY.md](ACCESSIBILITY.md)**.
+Accessibility is engineered in code (`core/a11y.py`) and **enforced by automated tests** (`tests/test_a11y.py`).
+
+- **In-app accessibility panel** (sidebar) — user-adjustable **text size** (WCAG 1.4.4) and **high-contrast
+  mode** (~21:1, beyond AAA), applied instantly.
+- **Skip-to-content link** (WCAG 2.4.1) — press `Tab` on page load to bypass navigation.
+- **Visible focus indicators** (WCAG 2.4.7) — 3 px high-contrast ring on every focusable element.
+- **Reduced-motion support** (WCAG 2.3.3) — honors the OS `prefers-reduced-motion` setting.
+- **44 px minimum target size** (WCAG 2.5.8) on buttons and controls.
+- **Every input, button, and metric has help text** — enforced by an AST-based test that fails CI if a
+  widget is added without it (WCAG 3.3.2).
+- **Charts have text alternatives** (WCAG 1.1.1) — plain-text summaries below every chart, test-enforced.
+- **Emoji are never the only signal** (WCAG 1.4.1) — every status icon is paired with a text label.
+- **Full keyboard operability** (WCAG 2.1.1) — native widgets expose ARIA roles/labels out of the box.
+- **AA contrast, test-enforced** (WCAG 1.4.3/1.4.11) — theme colors are recomputed with the WCAG luminance
+  formula on every test run; #e6edf7 on #0b1120 ≈ 15.9:1.
+- **Clear empty states** — first-time users get explicit next-step buttons rather than blank screens.
 
 ## 📁 Project structure
 
 ```
 unhooked-ai/
 ├── app.py                     # Streamlit UI — onboarding + 6 pages
+├── ACCESSIBILITY.md           # WCAG 2.1 AA conformance statement
 ├── core/
 │   ├── llm.py                 # Provider chain (Groq → Gemini), retries, JSON mode
 │   ├── db.py                  # SQLite layer — parameterized queries throughout
+│   ├── a11y.py                # WCAG helpers — contrast math + injectable CSS
 │   └── features.py            # All AI features + crisis guardrail
 ├── .streamlit/
 │   ├── config.toml            # Dark theme

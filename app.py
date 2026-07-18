@@ -11,7 +11,7 @@ from typing import Any
 
 import streamlit as st
 
-from core import db, features
+from core import a11y, db, features
 from core.llm import LLMError
 
 st.set_page_config(page_title="Unhooked — AI Recovery Coach", page_icon="🔓", layout="wide")
@@ -46,6 +46,15 @@ _RISK_STYLE = {
 def _ai_error(exc: LLMError) -> None:
     """Show a friendly, non-technical error when all AI providers are unavailable."""
     st.error(f"AI is temporarily unavailable — please try again in a moment. ({exc})")
+
+
+def _inject_accessibility() -> None:
+    """Inject WCAG 2.1 AA aids: skip link, focus rings, reduced-motion, and user a11y preferences."""
+    scale = a11y.TEXT_SCALES.get(st.session_state.get("a11y_text_scale", "Default"), 1.0)
+    high_contrast = bool(st.session_state.get("a11y_high_contrast", False))
+    css = a11y.build_css(text_scale=scale, high_contrast=high_contrast)
+    st.markdown(f"<style>{css}</style>", unsafe_allow_html=True)
+    st.markdown(a11y.SKIP_LINK_HTML + a11y.MAIN_ANCHOR_HTML, unsafe_allow_html=True)
 
 
 def _goto(page: str) -> None:
@@ -112,7 +121,9 @@ def _render_onboarding(*, allow_cancel: bool = False) -> None:
                     step=15,
                     help="Used to show time reclaimed as your streak grows",
                 )
-        submitted = st.form_submit_button("Build my recovery plan →", use_container_width=True)
+        submitted = st.form_submit_button(
+            "Build my recovery plan →", use_container_width=True, help="Create your profile and AI 4-week plan"
+        )
 
     if submitted:
         habit = habit_other.strip() if habit_choice.startswith("Other") and habit_other.strip() else habit_choice
@@ -165,15 +176,33 @@ def _render_sidebar(profiles: list[db.Profile]) -> db.Profile | None:
         profile = db.get_profile(chosen)
         if profile:
             streak = db.current_streak(profile.id)
-            st.metric("Clean streak", f"{streak} day{'s' if streak != 1 else ''} 🔥")
+            st.metric(
+                "Clean streak",
+                f"{streak} day{'s' if streak != 1 else ''} 🔥",
+                help="Consecutive clean days for this profile, ending today",
+            )
         st.divider()
         with st.expander("♿ Accessibility"):
+            st.radio(
+                "Text size",
+                list(a11y.TEXT_SCALES),
+                horizontal=True,
+                key="a11y_text_scale",
+                help="Larger text applies instantly across the whole app (WCAG 1.4.4)",
+            )
+            st.toggle(
+                "High contrast mode",
+                key="a11y_high_contrast",
+                help="Pure white on black (~21:1 contrast) for low-vision users",
+            )
             st.markdown(
                 "- **Keyboard**: Tab to move, arrows for radios/sliders, Enter to activate\n"
+                "- **Skip link**: press Tab on page load to jump past navigation\n"
                 "- **Help everywhere**: hover the *?* icon on any input\n"
                 "- **Charts**: each chart has a plain-text summary below it\n"
                 "- **Icons**: every status emoji is paired with a text label\n"
-                "- **Contrast**: dark theme meets WCAG AA"
+                "- **Motion**: honors your OS reduced-motion setting\n"
+                "- **Contrast**: dark theme meets WCAG 2.1 AA — see ACCESSIBILITY.md"
             )
         st.caption("⚡ Powered by Llama 3.3 on Groq · Gemini fallback")
         return profile
@@ -226,14 +255,16 @@ def _render_trend_chart(checkins: list[dict[str, Any]]) -> None:
         )
     else:
         st.info("Log your first daily check-in to start tracking trends.")
-        if st.button("📅 Do my first check-in →"):
+        if st.button("📅 Do my first check-in →", help="Open the daily check-in page"):
             _goto(PAGE_CHECKIN)
 
 
 def _render_risk_radar(profile: db.Profile) -> None:
     """Render AI relapse-risk analysis with a one-tap escalation to Craving SOS."""
     st.subheader("🎯 Relapse Risk Radar")
-    if st.button("Analyze my current risk", use_container_width=True):
+    if st.button(
+        "Analyze my current risk", use_container_width=True, help="AI reads your recent check-ins and flags risk"
+    ):
         _run_ai_action("risk", profile, features.relapse_risk, "AI analyzing your recent patterns...")
     risk = _cached_result("risk", profile.id)
     if not risk:
@@ -245,14 +276,16 @@ def _render_risk_radar(profile: db.Profile) -> None:
         st.success(f"**Do this:** {risk['action']}")
     if risk.get("pattern"):
         st.caption(f"Pattern spotted: {risk['pattern']}")
-    if risk.get("level") in ("watch", "high") and st.button("🆘 Get an SOS intervention now →"):
+    if risk.get("level") in ("watch", "high") and st.button(
+        "🆘 Get an SOS intervention now →", help="Open Craving SOS for an instant intervention"
+    ):
         _goto(PAGE_SOS)
 
 
 def _render_insights(profile: db.Profile) -> None:
     """Render AI-generated weekly wins, watch-outs, and next week's focus."""
     st.subheader("🧭 Weekly AI insights")
-    if st.button("Generate insights from my data"):
+    if st.button("Generate insights from my data", help="AI summarizes wins and watch-outs from your check-ins"):
         _run_ai_action("insights", profile, features.weekly_insights, "Crunching your real check-in data...")
     insights = _cached_result("insights", profile.id)
     if not insights:
@@ -305,6 +338,7 @@ def _render_checkin(profile: db.Profile) -> None:
             ("clean", "slip"),
             format_func=lambda s: "💪 Stayed clean" if s == "clean" else "😔 Slipped",
             horizontal=True,
+            help="Honest logging matters more than a perfect streak — slips are data, not failure",
         )
         mood = st.slider("Mood", 1, 5, 3, help="1 = rough day, 5 = great day")
         craving = st.slider("Craving intensity", 0, 10, 3, help="0 = no craving at all, 10 = overwhelming urge")
@@ -314,16 +348,18 @@ def _render_checkin(profile: db.Profile) -> None:
             height=70,
             help="Context helps the AI spot your patterns over time",
         )
-        submitted = st.form_submit_button("Check in →", use_container_width=True)
+        submitted = st.form_submit_button(
+            "Check in →", use_container_width=True, help="Save today's check-in and get an AI nudge"
+        )
     if submitted:
         _save_checkin(profile, status=status, mood=mood, craving=craving, note=note.strip())
     if st.session_state.get("checkin_followup"):
         st.markdown("**Rough day? These can help right now:**")
         col_sos, col_reframe = st.columns(2)
-        if col_sos.button("🆘 Craving SOS →", use_container_width=True):
+        if col_sos.button("🆘 Craving SOS →", use_container_width=True, help="Get an instant craving intervention"):
             st.session_state.pop("checkin_followup", None)
             _goto(PAGE_SOS)
-        if col_reframe.button("🧠 Reframe the thought →", use_container_width=True):
+        if col_reframe.button("🧠 Reframe the thought →", use_container_width=True, help="CBT-style thought reframe"):
             st.session_state.pop("checkin_followup", None)
             _goto(PAGE_REFRAME)
     _render_checkin_history(profile)
@@ -382,7 +418,9 @@ def _render_sos(profile: db.Profile) -> None:
             help="Naming the trigger makes the intervention specific to this moment",
         )
         intensity = st.slider("How strong is the urge?", 1, 10, 7, help="1 = mild itch, 10 = overwhelming")
-        pressed = st.form_submit_button("🆘 HELP ME NOW", use_container_width=True, type="primary")
+        pressed = st.form_submit_button(
+            "🆘 HELP ME NOW", use_container_width=True, type="primary", help="Generate a 5-part instant intervention"
+        )
     if pressed:
         with st.spinner("Generating your intervention..."):
             try:
@@ -410,7 +448,7 @@ def _render_sos(profile: db.Profile) -> None:
         st.markdown("### 💌 A message from future you")
         st.write(f"> {sos.get('future_you', '')}")
         st.caption("Cravings peak and pass in ~15–20 minutes. You've survived every one so far.")
-        if st.button("💬 Talk it through with your coach →"):
+        if st.button("💬 Talk it through with your coach →", help="Open the AI coach chat"):
             _goto(PAGE_COACH)
 
 
@@ -429,7 +467,9 @@ def _render_reframe(profile: db.Profile) -> None:
             height=80,
             help="Write it exactly as it sounds in your head — the AI names the distortion and reframes it",
         )
-        submitted = st.form_submit_button("Reframe it →", use_container_width=True)
+        submitted = st.form_submit_button(
+            "Reframe it →", use_container_width=True, help="AI names the cognitive distortion and reframes it"
+        )
     if submitted and thought.strip():
         if features.is_crisis(thought):
             st.warning(features.CRISIS_MESSAGE)
@@ -510,7 +550,7 @@ def _render_plan(profile: db.Profile) -> None:
         st.info("No plan yet — generate one below.")
     else:
         _render_plan_body(profile.plan)
-    if st.button("🔄 Regenerate plan with AI"):
+    if st.button("🔄 Regenerate plan with AI", help="Rebuild the 4-week plan from your current profile"):
         with st.spinner("Rebuilding your plan..."):
             try:
                 new_plan = features.generate_plan(profile)
@@ -525,6 +565,7 @@ def _render_plan(profile: db.Profile) -> None:
 
 def main() -> None:
     """Route between onboarding and the six app pages based on session state."""
+    _inject_accessibility()
     profiles = db.list_profiles()
     if st.session_state.get("creating_profile"):
         _render_onboarding(allow_cancel=bool(profiles))
@@ -540,6 +581,7 @@ def main() -> None:
         _PAGES,
         key="nav",
         label_visibility="collapsed",
+        help="Choose which page to view",
     )
     if st.session_state.pop("plan_error", None) and not profile.plan:
         st.warning(
