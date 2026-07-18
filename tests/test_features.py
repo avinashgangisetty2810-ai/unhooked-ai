@@ -168,3 +168,35 @@ class TestStreamingVariants:
         prompt = cs.call_args.args[0][0]["content"]
         assert "status=clean" in prompt
         assert "gym" in prompt
+
+
+class TestToneContract:
+    """Every user-facing AI prompt must carry the motivating/plain-language tone rules."""
+
+    def test_tone_rules_demand_motivating_plain_interactive_voice(self) -> None:
+        assert "Motivating" in features._TONE_RULES
+        assert "Plain, simple English" in features._TONE_RULES
+        assert "question" in features._TONE_RULES  # interactive: invite a reply/action
+
+    def test_json_feature_prompts_include_tone_rules(self, profile: db.Profile) -> None:
+        db.upsert_checkin(profile_id=profile.id, status="clean", mood=4, craving=3, note="", ai_response="")
+        plan = {"weeks": [{"week": 1}]}
+        calls = [
+            lambda: features.generate_plan(profile),
+            lambda: features.sos_intervention(profile, trigger="stress", intensity=8),
+            lambda: features.reframe_thought(profile, "just one"),
+            lambda: features.relapse_risk(profile),
+            lambda: features.weekly_insights(profile),
+        ]
+        for call in calls:
+            with patch.object(features, "chat_json", return_value=plan) as cj:
+                call()
+            assert features._TONE_RULES in cj.call_args.args[0][0]["content"]
+
+    def test_text_feature_prompts_include_tone_rules(self, profile: db.Profile) -> None:
+        with patch.object(features, "chat", return_value="ok") as chat:
+            features.checkin_nudge(profile, status="clean", mood=5, craving=1, note="")
+        assert features._TONE_RULES in chat.call_args.args[0][0]["content"]
+        with patch.object(features, "chat", return_value="ok") as chat:
+            features.coach_reply(profile, [], "help")
+        assert features._TONE_RULES in chat.call_args.args[0][0]["content"]  # system prompt

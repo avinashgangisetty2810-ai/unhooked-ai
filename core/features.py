@@ -39,6 +39,15 @@ def is_crisis(text: str) -> bool:
     return any(keyword in lowered for keyword in _CRISIS_KEYWORDS)
 
 
+_TONE_RULES: Final[str] = """Voice & tone rules (apply to EVERY sentence you write):
+- Motivating and hopeful — sound like a coach who genuinely believes in them, never flat or robotic.
+- Plain, simple English an 8th-grader would get. Short sentences. Zero clinical jargon —
+  say "spot the trap in that thought", not "cognitive restructuring".
+- Conversational and interactive — talk TO them by name, use "you", and where natural end
+  with one short question or a tiny challenge that invites them to act or reply.
+- Encouraging, never preachy or shaming. Celebrate effort, not just results."""
+
+
 def _profile_context(profile: db.Profile) -> str:
     streak = db.current_streak(profile.id)
     recent = db.get_checkins(profile.id, limit=7)
@@ -81,7 +90,9 @@ Return ONLY a JSON object with this exact shape:
   ],
   "mantra": "one short personal mantra referencing their motivation"
 }}
-Include exactly 4 weeks. Every tactic must be concrete and actionable."""
+Include exactly 4 weeks. Every tactic must be concrete and actionable.
+
+{_TONE_RULES}"""
     plan = chat_json([{"role": "user", "content": prompt}])
     if "weeks" not in plan or not isinstance(plan["weeks"], list) or not plan["weeks"]:
         raise ValueError("Plan is missing weekly stages")
@@ -104,7 +115,10 @@ Write a 3-5 sentence personal response. Rules:
 - If slip: zero shame. Normalize it, extract one lesson from their note/triggers, give one
   concrete action for the next 24 hours.
 - If craving >= 7: acknowledge how hard today was.
-- Speak directly to {profile.name}. No headers, no bullet lists, just the message."""
+- Speak directly to {profile.name}. No headers, no bullet lists, just the message.
+- End with one short question or micro-challenge for tomorrow.
+
+{_TONE_RULES}"""
 
 
 def checkin_nudge(profile: db.Profile, *, status: str, mood: int, craving: int, note: str) -> str:
@@ -147,7 +161,9 @@ Return ONLY a JSON object:
 }}
 Every field must be specific to this person, this trigger, and this moment — no generic
 advice, and never the same wording for different triggers. Personal and urgent-friendly,
-never clinical."""
+never clinical.
+
+{_TONE_RULES}"""
     return chat_json([{"role": "user", "content": prompt}], temperature=0.9)
 
 
@@ -167,7 +183,9 @@ Return ONLY a JSON object:
   "why": "1-2 sentences explaining how this distortion works against them",
   "reframe": "a believable, compassionate replacement thought in first person",
   "question": "one Socratic question they can ask themselves next time this thought appears"
-}}"""
+}}
+
+{_TONE_RULES}"""
     return chat_json([{"role": "user", "content": prompt}], temperature=0.7)
 
 
@@ -192,7 +210,9 @@ Return ONLY a JSON object:
     craving intensity, slips, notes)",
   "action": "one preventive action tailored to what you found",
   "pattern": "one insight about when/why they struggle most, if detectable"
-}}"""
+}}
+
+{_TONE_RULES}"""
     result = chat_json([{"role": "user", "content": prompt}], temperature=0.4)
     if result.get("level") not in {"low", "watch", "high"}:
         result["level"] = "watch"
@@ -217,7 +237,9 @@ Return ONLY a JSON object:
   "next_week_focus": "one clear focus recommendation",
   "trend": "improving" | "steady" | "struggling"
 }}
-Cite actual numbers from the data (streak, moods, craving levels)."""
+Cite actual numbers from the data (streak, moods, craving levels).
+
+{_TONE_RULES}"""
     return chat_json([{"role": "user", "content": prompt}], temperature=0.5)
 
 
@@ -233,8 +255,11 @@ You know this user's real data:
 
 Their recovery plan mantra: {profile.plan.get('mantra', 'not set')}
 Ground every answer in their actual habit, triggers, and progress. Never invent data.
+When it fits, end your reply with one short question that keeps the conversation going.
 If they mention self-harm or suicide, tell them to contact AASRA 91-9820466726 (India) or
-https://findahelpline.com immediately."""
+https://findahelpline.com immediately.
+
+{_TONE_RULES}"""
     messages: list[dict[str, str]] = [{"role": "system", "content": system}]
     messages.extend(history[-12:])
     messages.append({"role": "user", "content": user_message})
