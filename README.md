@@ -4,7 +4,7 @@
 
 Built for the **Hack2Skills GenAI Hackathon** — *Breaking Bad Habits & Addiction* challenge.
 
-> 🌐 **Live demo:** _<add Streamlit Cloud URL here>_
+> 🌐 **Live demo:** https://unhooked.streamlit.app
 
 ---
 
